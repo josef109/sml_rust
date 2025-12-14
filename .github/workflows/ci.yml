@@ -1,0 +1,83 @@
+name: Rust CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform.name }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          # --- Native x86 Build ---
+          - name: Linux-x86_64
+            target: x86_64-unknown-linux-gnu
+            method: native
+
+          # --- ARMv7 (32-bit) Build mit Docker ---
+          - name: Linux-armv7
+            target: armv7-unknown-linux-gnueabihf
+            method: docker
+            dockerfile: tools/Dockerfile.armv7
+            image_tag: rust-armv7-builder
+
+          # --- Aarch64 (64-bit) Build mit Docker ---
+          - name: Linux-aarch64
+            target: aarch64-unknown-linux-gnu
+            method: docker
+            dockerfile: tools/Dockerfile.aarch64
+            image_tag: rust-aarch64-builder
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # --- Kopieren (optional) ---
+      # Falls Ihr Code in einem Unterordner liegt, sonst diesen Block löschen
+      - name: Copy test project to root
+        shell: bash
+        run: |
+          if [ -d "sml_rust" ]; then
+            cp -a sml_rust/* .
+            rm -fr sml_rust
+          fi
+
+      # --- FALL 1: Native x86_64 ---
+      - name: Install dependencies (x86_64)
+        if: matrix.platform.method == 'native'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y librrd-dev libudev-dev pkg-config build-essential
+
+      - name: Build (x86_64)
+        if: matrix.platform.method == 'native'
+        run: cargo build --release --target ${{ matrix.platform.target }}
+
+      # --- FALL 2: Docker Builds (ARMv7 & Aarch64) ---
+      - name: Build Docker Image
+        if: matrix.platform.method == 'docker'
+        run: |
+          docker build -t ${{ matrix.platform.image_tag }} -f ${{ matrix.platform.dockerfile }} .
+
+      - name: Compile inside Docker
+        if: matrix.platform.method == 'docker'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/usr/src/myapp \
+            -w /usr/src/myapp \
+            -e CARGO_HOME=/usr/src/myapp/.cargo_cache \
+            ${{ matrix.platform.image_tag }} \
+            cargo build --release --target ${{ matrix.platform.target }}
+
+      # --- Artifact Upload ---
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.platform.target }}
+          path: |
+            target/${{ matrix.platform.target }}/release/sml_rust
+            target/${{ matrix.platform.target }}/release/eure_binary_name
+          if-no-files-found: warn

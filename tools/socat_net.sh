@@ -1,0 +1,1 @@
+socat -d -d TCP:xxxxx:8765,ignoreeof pty,raw,echo=0

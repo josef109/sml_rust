@@ -1,0 +1,88 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Launch x86",
+            "program": "${workspaceFolder}/target/debug/sml_rust",
+            "args": [
+                "--mqtt-user",
+                "xxxxx",
+                "--mqtt-pass",
+                "xxxx",
+                "--serial-port",
+                "/dev/pts/7"
+            ],
+            "env": {
+                "RUST_LOG": "debug"
+            },
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Custom launch",
+            "targetCreateCommands": [
+                "target create ${workspaceFolder}/<program>"
+            ],
+            "processCreateCommands": [
+                "settings set target.run-args value1 value2 value3",
+                "process launch"
+            ]
+        },
+        {
+            "name": "Remote launch",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/armv7-unknown-linux-gnueabihf/debug/sml_rust", // Local path.
+            "initCommands": [
+                "platform select remote-linux", // For example: 'remote-linux', 'remote-macosx', 'remote-android', etc.
+                "platform connect connect://DietPi.fritz.box:1234",
+                "settings set target.disable-aslr false",
+            ],
+            "env": {
+                "PATH": "/home/dietpi/sml_rust", // See note below.
+                "RUST_LOG": "debug"
+            },
+            "args": [
+                "--mqtt-user",
+                "xxxxx",
+                "--mqtt-pass",
+                "xxxx"
+            ],
+            //           "cwd": "/home/dietpie/sml_rust",
+        },
+        {
+            "name": "Remote launch release",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/armv7-unknown-linux-gnueabihf/release/sml_rust", // Local path.
+            "initCommands": [
+                "platform select remote-linux", // For example: 'remote-linux', 'remote-macosx', 'remote-android', etc.
+                "platform connect connect://DietPi.fritz.box:1234",
+                "settings set target.disable-aslr false",
+            ],
+            "env": {
+                "PATH": "/home/dietpi/sml_rust", // See note below.
+                "RUST_LOG": "debug"
+            },
+            "args": [
+                "--mqtt-user",
+                "xxxxx",
+                "--mqtt-pass",
+                "xxxx"
+            ],
+            //           "cwd": "/home/dietpie/sml_rust",
+        },
+        {
+            "name": "Core dump",
+            "type": "lldb",
+            "request": "attach",
+            "targetCreateCommands": [
+                "target create -c ${workspaceFolder}/core"
+            ],
+            "processCreateCommands": []
+        }
+    ]
+}

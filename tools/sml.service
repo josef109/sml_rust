@@ -1,0 +1,21 @@
+[Unit]
+Description=SML Rust Reader
+After=network.target
+
+[Service]
+User=pi
+Group=dialout
+WorkingDirectory=/home/pi/sml_rust
+ExecStart=/home/pi/sml_rust/sml_rust \
+    --serial-port /tmp/ttySML \
+    --mqtt-user sml \
+    --mqtt-pass DEIN_PASSWORT \
+    --rrd-path /tmp/ehz/ehz.rrd \ 
+    --image-output-path /tmp/images
+
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=error
+
+[Install]
+WantedBy=multi-user.target

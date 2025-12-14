@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title data-i18n="app_title">Stromverbrauchsmonitor</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.3.1/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.8.0/Chart.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+    <nav class="navbar navbar-expand navbar-dark mb-4">
+        <div class="container">
+            <a class="navbar-brand" href="#">
+                <i class="fas fa-bolt mr-2"></i><span data-i18n="app_title">Stromverbrauchsmonitor</span>
+            </a>
+
+            <div class="lang-switch ml-auto text-white">
+                <span id="btn-de" class="lang-btn active" onclick="setLanguage('de')">DE</span>
+                |
+                <span id="btn-en" class="lang-btn" onclick="setLanguage('en')">EN</span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <ul class="nav nav-pills justify-content-center mb-4" role="tablist">
+            <li class="nav-item">
+                <a class="nav-link active" data-toggle="pill" href="#livedata">
+                    <i class="fas fa-chart-bar mr-1"></i><span data-i18n="nav_live">Echtzeit</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-toggle="pill" href="#hours">
+                    <i class="fas fa-clock mr-1"></i><span data-i18n="nav_hour">Stunde</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-toggle="pill" href="#days">
+                    <i class="fas fa-calendar-day mr-1"></i><span data-i18n="nav_day">Tag</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-toggle="pill" href="#weeks">
+                    <i class="fas fa-calendar-week mr-1"></i><span data-i18n="nav_week">Woche</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-toggle="pill" href="#status">
+                    <i class="fas fa-server mr-1"></i><span data-i18n="nav_status">Status</span>
+                </a>
+            </li>
+        </ul>
+
+        <div class="tab-content">
+
+            <div id="livedata" class="container tab-pane active">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-chart-line mr-2"></i><span
+                            data-i18n="card_live_title">Live-Leistungsverlauf</span>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="liveChart" class="max-chart-height"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div id="hours" class="container tab-pane fade">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-clock mr-2"></i><span data-i18n="card_hour_title">Verlauf der letzten
+                            Stunde</span>
+                    </div>
+                    <div class="card-body text-center">
+                        <img id="img-hour" src="/static/images/strom-stunde-de.png" class="img-fluid max-chart-height"
+                            alt="Chart Hour">
+                    </div>
+                </div>
+            </div>
+
+            <div id="days" class="container tab-pane fade">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-calendar-day mr-2"></i><span data-i18n="card_day_title">Verlauf der letzten 24
+                            Stunden</span>
+                    </div>
+                    <div class="card-body text-center">
+                        <img id="img-day" src="/static/images/strom-tag-de.png" class="img-fluid max-chart-height"
+                            alt="Chart Day">
+                    </div>
+                </div>
+            </div>
+
+            <div id="weeks" class="container tab-pane fade">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-calendar-week mr-2"></i><span data-i18n="card_week_title">Verlauf der letzten
+                            Woche</span>
+                    </div>
+                    <div class="card-body text-center">
+                        <img id="img-week" src="/static/images/strom-woche-de.png" class="img-fluid max-chart-height"
+                            alt="Chart Week">
+                    </div>
+                </div>
+            </div>
+
+            <div id="status" class="container tab-pane fade">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-info-circle mr-2"></i><span data-i18n="card_status_title">Aktuelle Messwerte &
+                            Status</span>
+                    </div>
+                    <div class="card-body">
+
+                        <div class="last-update">
+                            <i class="fas fa-sync-alt mr-1"></i><span data-i18n="last_update">Letztes Update:</span>
+                            <span id="last-update">--:--:--</span>
+                        </div>
+
+                        <h3 class="section-title" data-i18n="section_current_values">Momentanwerte</h3>
+
+                        <div class="row">
+                            <div class="col-md-4 col-sm-6">
+                                <div class="card stat-card">
+                                    <div class="stat-label" data-i18n="stat_power">Aktuelle Leistung</div>
+                                    <div class="stat-value" id="leistung">---</div>
+                                    <div>Watt</div>
+                                </div>
+                            </div>
+
+                            <div class="col-md-4 col-sm-6">
+                                <div class="card stat-card">
+                                    <div class="stat-label" data-i18n="stat_meter">Zählerstand (Bezug)</div>
+                                    <div class="stat-value" id="bezug">---</div>
+                                    <div>Wh</div>
+                                </div>
+                            </div>
+
+                            <div class="col-md-4 col-sm-12">
+                                <div class="card stat-card">
+                                    <div class="stat-label" data-i18n="stat_direction">Netzrichtung</div>
+                                    <div class="alert alert-status mb-0 mt-2" id="einspeisung-status"
+                                        style="margin: 0 auto; width: 90%;">
+                                        <span class="status-indicator status-false"></span>
+                                        <span id="einspeisung" data-i18n="status_init">Initialisiere...</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mt-4 text-center text-muted">
+                            <small><i class="fas fa-info-circle"></i> <span data-i18n="footer_note">Die Grafiken werden
+                                    alle 30 Sekunden aktualisiert.</span></small>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <div class="footer">
+        <div class="container">
+            <p>Stromverbrauchsmonitor &copy; 2025 | SML-Reader Rust</p>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.4.0/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.3.1/js/bootstrap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.8.0/Chart.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/locale/de.min.js"></script>
+
+    <script src="/static/app.js"></script>
+</body>
+
+</html>

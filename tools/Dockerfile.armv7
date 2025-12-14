@@ -1,0 +1,40 @@
+FROM rust:latest 
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Dockerfile.musl
+FROM rust:latest 
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN dpkg --add-architecture armhf && \
+    apt-get update && \
+    apt-get install --assume-yes \
+    build-essential \
+    librrd-dev:armhf \
+    #musl-tools \
+    #musl-dev:armhf \
+    libssl-dev:armhf \
+    libudev-dev:armhf \
+    cmake \
+    pkg-config:armhf \
+    libclang-dev \
+    # **Install the standard GNU cross-compiler package**
+    gcc-arm-linux-gnueabihf \
+    g++-arm-linux-gnueabihf && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+
+ENV PKG_CONFIG_ALLOW_CROSS=1
+ENV PKG_CONFIG_SYSROOT_DIR=/
+
+ENV PKG_CONFIG_PATH="/usr/lib/arm-linux-gnueabihf/pkgconfig"
+
+RUN rustup target add armv7-unknown-linux-gnueabihf
+
+#ENV RUSTFLAGS="-C linker=arm-linux-gnueabihf-gcc -C link-arg=-Wl,-Bdynamic"
+
+ENV RUSTFLAGS="-C linker=arm-linux-gnueabihf-gcc -C link-arg=-Wl,-Bstatic -C link-arg=-lrrd -C link-arg=-Wl,-Bdynamic"
+
+ENV LIBRRD="/usr/lib/arm-linux-gnueabihf/librrd.so"

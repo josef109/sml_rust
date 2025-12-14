@@ -1,0 +1,35 @@
+FROM rust:latest
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 1. Architektur auf arm64 ändern
+RUN dpkg --add-architecture arm64 && \
+    apt-get update && \
+    apt-get install --assume-yes \
+    build-essential \
+    librrd-dev:arm64 \
+    libssl-dev:arm64 \
+    libudev-dev:arm64 \
+    cmake \
+    pkg-config:arm64 \
+    libclang-dev \
+    # 2. Cross-Compiler für Aarch64 installieren
+    gcc-aarch64-linux-gnu \
+    g++-aarch64-linux-gnu && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+ENV PKG_CONFIG_ALLOW_CROSS=1
+ENV PKG_CONFIG_SYSROOT_DIR=/
+
+# 3. Pfad zum pkgconfig für aarch64 anpassen
+ENV PKG_CONFIG_PATH="/usr/lib/aarch64-linux-gnu/pkgconfig"
+
+# 4. Rust Target für 64-bit ARM hinzufügen
+RUN rustup target add aarch64-unknown-linux-gnu
+
+# 5. Linker auf aarch64-linux-gnu-gcc ändern
+# Die statischen Link-Argumente für librrd wurden übernommen
+ENV RUSTFLAGS="-C linker=aarch64-linux-gnu-gcc -C link-arg=-Wl,-Bstatic -C link-arg=-lrrd -C link-arg=-Wl,-Bdynamic"
+
+ENV LIBRRD="/usr/lib/aarch64-linux-gnu/librrd.so"
