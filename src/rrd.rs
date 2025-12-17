@@ -1,6 +1,12 @@
 use crate::config::Config;
+use crate::model::SharedAppState;
+use axum::extract::{Query, State};
+use axum::Json;
+use chrono::{DateTime, Local, TimeZone};
 //use chrono::format::Numeric;
-use chrono::{Local, Timelike, Utc};
+use chrono::{Datelike, Months, NaiveTime, Timelike, Utc};
+use rrd::ops::fetch;
+use serde::Deserialize;
 use tokio::time::sleep;
 use tokio::time::Duration;
 use tokio_util::sync::CancellationToken;
@@ -15,8 +21,17 @@ use rrd::{
 };
 use std::error::Error;
 use std::path::{Path, PathBuf};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
+type UtcDateTime = chrono::DateTime<chrono::Utc>;
+
+#[derive(Deserialize)]
+pub struct LiveQuery {
+    pub ds: String,
+    pub seconds: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum Language {
     De,
     En,
@@ -107,17 +122,71 @@ pub fn ensure_rrd(config: &Config) {
     }
 }
 
-pub fn update_rrd(path: &Path, bezug: u64, einspeisung: u64, wirkleistung: i32) {
+pub async fn live_data(
+    State(state): State<SharedAppState>,
+    Query(q): Query<LiveQuery>,
+) -> Json<Vec<(DateTime<Local>, i32)>> {
+    let rrd_path = {
+        let s = state.lock().unwrap();
+        s.rrd_path.clone()
+    };
+
+    let now = chrono::Utc::now();
+    let start = now - Duration::from_secs(q.seconds);
+
+    // Fetch ausführen
+    let rc = fetch::fetch(
+        &rrd_path,
+        ConsolidationFn::Avg,
+        start,
+        now,
+        Duration::from_secs(3),
+    );
+
+    match rc {
+        Ok(data) => {
+            let ds_names = data.ds_names();
+            // Index der gewünschten Datenquelle (z.B. "Wirkleistung") finden
+            let ds_index = ds_names.iter().position(|name| name == &q.ds);
+
+            if let Some(idx) = ds_index {
+                let points: Vec<(DateTime<Local>, i32)> = data
+                    .rows()
+                    .iter()
+                    .filter_map(|row| {
+                        let val = row[idx];
+                        // NaN Werte (Lücken in der RRD) ignorieren
+                        if val.is_nan() {
+                            None
+                        } else {
+                            let ts = row.timestamp().timestamp();
+                            // 2. In lokale Zeit umwandeln (wie in sml.rs)
+                            let local_time = chrono::Local.timestamp_opt(ts, 0).unwrap();
+
+                            Some((local_time, val as i32))
+                        }
+                    })
+                    .collect();
+
+                Json(points)
+            } else {
+                Json(vec![]) // DS nicht gefunden
+            }
+        }
+        Err(err) => {
+            error!("RRD Fetch Fehler: {}", err);
+            Json(vec![])
+        }
+    }
+}
+
+pub fn update_rrd(path: &Path, import: u64, export: u64, power: i32) {
     let rc = update::update_all(
         path,
         update::ExtraFlags::empty(),
         &[(
             update::BatchTime::Now,
-            &[
-                bezug.into(),
-                einspeisung.into(),
-                (wirkleistung as f64).into(),
-            ],
+            &[import.into(), export.into(), (power as f64).into()],
         )],
     );
     match rc {
@@ -128,6 +197,13 @@ pub fn update_rrd(path: &Path, bezug: u64, einspeisung: u64, wirkleistung: i32) 
 
 pub async fn run_graph_loop(config: Config, token: CancellationToken) {
     let mut last_hour = Local::now().hour();
+    let mut last_month = Local::now().month();
+    let mut first_loop = false;
+    let lang_enum = if config.language == "en" {
+        Language::En
+    } else {
+        Language::De
+    };
     info!("Starting native graph generator loop");
 
     if !Path::new(&config.image_output_path).exists() {
@@ -148,28 +224,19 @@ pub async fn run_graph_loop(config: Config, token: CancellationToken) {
         }
         let now = Local::now();
         let current_hour = now.hour();
-
-        let path_hour_de = format!("{}/strom-stunde-de.png", config.image_output_path);
-        let path_hour_en = format!("{}/strom-stunde-en.png", config.image_output_path);
+        let current_month = now.month();
 
         if let Err(e) = generate_graph(
             config.rrd_path.clone(),
-            &path_hour_de,
+            &config.image_output_path,
+            // &path_hour,
             GraphPeriod::Hour,
-            Language::De,
+            lang_enum,
         ) {
-            error!("Error generating hourly graph (DE): {}", e);
-        }
-        if let Err(e) = generate_graph(
-            config.rrd_path.clone(),
-            &path_hour_en,
-            GraphPeriod::Hour,
-            Language::En,
-        ) {
-            error!("Error generating hourly graph (EN): {}", e);
+            error!("Error generating hourly graph: {}", e);
         }
 
-        if current_hour != last_hour {
+        if current_hour != last_hour || !first_loop {
             if current_hour == 0 {
                 info!("Backing up RRD database");
                 match std::fs::copy(&config.rrd_path, &config.rrd_backup_path) {
@@ -185,50 +252,46 @@ pub async fn run_graph_loop(config: Config, token: CancellationToken) {
                 }
             }
             info!("Generating day graph");
-            let path_day_de = format!("{}/strom-tag-de.png", config.image_output_path);
-            let path_day_en = format!("{}/strom-tag-en.png", config.image_output_path);
 
             if let Err(e) = generate_graph(
                 config.rrd_path.clone(),
-                &path_day_de,
+                &config.image_output_path,
                 GraphPeriod::Day,
-                Language::De,
+                lang_enum,
             ) {
                 error!("Error generating daily graph (DE): {}", e);
             }
-            if let Err(e) = generate_graph(
-                config.rrd_path.clone(),
-                &path_day_en,
-                GraphPeriod::Day,
-                Language::En,
-            ) {
-                error!("Error generating daily graph (EN): {}", e);
-            }
 
-            if current_hour == 1 {
+            if current_hour == 1 || !first_loop {
                 info!("Generating week graph");
-                let path_week_de = format!("{}/strom-woche-de.png", config.image_output_path);
-                let path_week_en = format!("{}/strom-week-en.png", config.image_output_path);
 
                 if let Err(e) = generate_graph(
                     config.rrd_path.clone(),
-                    &path_week_de,
+                    &config.image_output_path,
                     GraphPeriod::Week,
-                    Language::De,
+                    lang_enum,
                 ) {
                     error!("Error generating daily graph (DE): {}", e);
                 }
-                if let Err(e) = generate_graph(
-                    config.rrd_path.clone(),
-                    &path_week_en,
-                    GraphPeriod::Week,
-                    Language::En,
-                ) {
-                    error!("Error generating daily graph (EN): {}", e);
-                }
             }
+
             last_hour = current_hour;
         }
+        if (current_month != last_month && current_hour == 2) || !first_loop {
+            info!("Generating month graph");
+
+            if let Err(e) = generate_graph(
+                config.rrd_path.clone(),
+                &config.image_output_path,
+                GraphPeriod::Month,
+                lang_enum,
+            ) {
+                error!("Error generating daily graph (DE): {}", e);
+            }
+
+            last_month = current_month;
+        }
+        first_loop = true;
     }
 }
 
@@ -237,28 +300,48 @@ enum GraphPeriod {
     Hour,
     Day,
     Week,
+    Month,
 }
 
-fn calculate_duration(period: GraphPeriod) -> Duration {
-    // Definieren Sie die Umrechnungsfaktoren
-    const SECONDS_PER_HOUR: u64 = 60 * 60;
-    const SECONDS_PER_DAY: u64 = SECONDS_PER_HOUR * 24;
-    const SECONDS_PER_WEEK: u64 = SECONDS_PER_DAY * 7;
+fn get_graph_range(period: GraphPeriod) -> (UtcDateTime, Option<UtcDateTime>) {
+    let now = Utc::now();
+    let today_midnight = now.with_time(NaiveTime::MIN).unwrap() - Duration::from_secs(1);
 
-    // Berechnen Sie die Sekundenanzahl mit einem match-Statement
-    let seconds = match period {
-        GraphPeriod::Hour => SECONDS_PER_HOUR,
-        GraphPeriod::Day => SECONDS_PER_DAY,
-        GraphPeriod::Week => SECONDS_PER_WEEK,
-    };
+    match period {
+        GraphPeriod::Hour => (now - Duration::from_hours(1) + Duration::from_secs(1), None),
+        GraphPeriod::Day => (
+            now - Duration::from_hours(24) + Duration::from_secs(1),
+            None,
+        ),
+        GraphPeriod::Week => {
+            // Start: Vor 7 Tagen um 00:00
+            // Ende: Heute um 00:00
+            let start = (now - Duration::from_hours(24 * 7))
+                .with_time(NaiveTime::MIN)
+                .unwrap();
+            (start, Some(today_midnight))
+        }
+        GraphPeriod::Month => {
+            // Start: Der 1. des Vormonats um 00:00
+            let last_month_root = now.checked_sub_months(Months::new(1)).expect("Date error");
+            let start = last_month_root
+                .with_day(1)
+                .unwrap()
+                .with_time(NaiveTime::MIN)
+                .unwrap();
 
-    // Erzeugen Sie die std/tokio::Duration
-    Duration::from_secs(seconds)
+            // Ende: Der letzte Moment des Vormonats (01. d. M. 00:00:00 - 1 Sekunde)
+            let end = now.with_day(1).unwrap().with_time(NaiveTime::MIN).unwrap()
+                - Duration::from_secs(1);
+
+            (start, Some(end))
+        }
+    }
 }
 
 fn generate_graph(
     rrd_file: PathBuf,
-    output_file: &str,
+    output_path: &str,
     period: GraphPeriod,
     lang: Language,
 ) -> Result<(), Box<dyn Error>> {
@@ -277,12 +360,47 @@ fn generate_graph(
             ("Stromverbrauch - diese Woche", "Bezug", "Einspeisung")
         }
         (GraphPeriod::Week, Language::En) => ("Power Usage - this week", "Import", "Export"),
+        (GraphPeriod::Month, Language::De) => {
+            ("Stromverbrauch - letzten Monat", "Bezug", "Einspeisung")
+        }
+        (GraphPeriod::Month, Language::En) => ("Power Usage - last month", "Import", "Export"),
     };
 
+    let output_file = output_path.to_owned()
+        + "/power_"
+        + match period {
+            GraphPeriod::Hour => "hour",
+            GraphPeriod::Day => "day",
+            GraphPeriod::Week => "week",
+            GraphPeriod::Month => "month",
+        }
+        + ".png";
     // Die Dauer, um die zurückgerechnet werden soll, basierend auf der Enum ermitteln
-
-    let start_time = Utc::now() - calculate_duration(period);
-
+    //let start_time = Utc::now() - calculate_duration(period);
+    let (start_time, end_time) = get_graph_range(period);
+    debug!("Start: {} Ende: {:?}", start_time, end_time);
+    // let start_time = match period {
+    //     GraphPeriod::Hour => Utc::now() - Duration::from_secs(60 * 60),
+    //     GraphPeriod::Day => Utc::now() - Duration::from_secs(60 * 60 * 24),
+    //     GraphPeriod::Week => {
+    //         (Utc::now() - Duration::days(7))
+    //             .with_time(chrono::NaiveTime::MIN) // Setzt auf 00:00:00
+    //             .unwrap()
+    //     }
+    //     GraphPeriod::Month => Utc::now()
+    //         .checked_sub_months(Months::new(1))
+    //         .expect("Date error"),
+    // };
+    // let end_time = match period {
+    //     GraphPeriod::Hour => None,
+    //     GraphPeriod::Day => None,
+    //     GraphPeriod::Week => Some(Utc::now() - Duration::from_secs(60 * 60 * 24 * 7)),
+    //     GraphPeriod::Month => Some(
+    //         Utc::now()
+    //             .checked_sub_months(Months::new(1))
+    //             .expect("Date error"),
+    //     ),
+    // };
     // let var_name_ein = VarName::new("ein".to_string())?;
     // let var_name_bez = VarName::new("bez".to_string())?;
     // let var_name_lei = VarName::new("lei".to_string())?;
@@ -332,8 +450,18 @@ fn generate_graph(
         }
         .into(),
         elements::CDef {
+            var_name: VarName::new("bezug_kwh".to_string())?,
+            rpn: "bez,10000,/".to_string(),
+        }
+        .into(),
+        elements::CDef {
             var_name: VarName::new("wirkleistung".to_string())?,
             rpn: "lei,10000,+,100,/".to_string(),
+        }
+        .into(),
+        elements::VDef {
+            var_name: VarName::new("Verbrauch".to_string())?,
+            rpn: "bezug_kwh,TOTAL".to_string(),
         }
         .into(),
         elements::Line {
@@ -399,6 +527,11 @@ fn generate_graph(
             dashes: None,
         }
         .into(),
+        elements::GPrint {
+            var_name: VarName::new("Verbrauch".to_string())?,
+            format: "Verbrauch\\: %1.2lf kWh".to_string(),
+        }
+        .into(),
         elements::Comment { text: watermark }.into(),
     ];
 
@@ -414,6 +547,7 @@ fn generate_graph(
         },
         time_range: props::TimeRange {
             start: Some(start_time),
+            end: end_time,
             ..Default::default()
         },
         y_axis: props::YAxis {

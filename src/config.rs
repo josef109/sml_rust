@@ -30,4 +30,7 @@ pub struct Config {
 
     #[arg(long, env, default_value = "0.0.0.0:5000")]
     pub server_addr: String,
+
+    #[arg(long, env, default_value = "de")]
+    pub language: String,
 }

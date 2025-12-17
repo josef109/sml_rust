@@ -49,7 +49,7 @@ sequenceDiagram
 
     Note over RRD: Graph Loop periodically<br/>reads this to create PNGs
 
-    State->>Web: SSE Push (JSON: {time, value, total_energy})
+    State->>Web: SSE Push (JSON: {time, value, total_energy_in})
  ```   
 ---
 

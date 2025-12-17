@@ -12,10 +12,14 @@
                 "--mqtt-pass",
                 "xxxx",
                 "--serial-port",
-                "/dev/pts/7"
+                "/dev/pts/5",
+                "--language",
+                "de"
             ],
             "env": {
-                "RUST_LOG": "debug"
+                "RUST_LOG": "debug",
+                "LC_TIME": "de_DE.UTF-8",
+                // "LC_ALL": "LC_TIME=C TZ=Europe/Berlin"
             },
             "cwd": "${workspaceFolder}"
         },

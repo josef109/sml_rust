@@ -1,4 +1,5 @@
 use crate::model::SharedAppState;
+use crate::rrd::live_data;
 use axum::{
     extract::State,
     http::StatusCode,
@@ -17,32 +18,25 @@ use tracing::info;
 
 // --- 5. Handler für die HTML-Seite (Liest index.html aus dem static-Ordner) ---
 
-async fn html_handler() -> impl IntoResponse {
+async fn html_handler(State(state): State<SharedAppState>) -> impl IntoResponse {
+    let lang = {
+        let s = state.lock().unwrap();
+        s.default_language.clone()
+    };
+
     let mut file = match File::open("static/index.html").await {
         Ok(f) => f,
-        Err(e) => {
-            eprintln!("Fehler beim Lesen von index.html: {}", e);
-            // Im Fehlerfall eine einfache Fehlermeldung zurückgeben
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Html(
-                    "<h1>500 Internal Server Error</h1><p>Konnte index.html nicht laden.</p>"
-                        .to_string(),
-                ),
-            );
-        }
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Html("Error".to_string())),
     };
 
     let mut contents = String::new();
-    if let Err(e) = file.read_to_string(&mut contents).await {
-        eprintln!("Fehler beim Lesen des Inhalts von index.html: {}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Html("<h1>500 Internal Server Error</h1><p>Konnte Inhalt nicht lesen.</p>".to_string()),
-        );
-    }
+    file.read_to_string(&mut contents).await.unwrap();
 
-    (StatusCode::OK, Html(contents))
+    // Variable für JavaScript injizieren
+    let injected_script = format!("<script>window.SERVER_LANG = '{}';</script>", lang);
+    let final_html = contents.replace("<head>", &format!("<head>{}", injected_script));
+
+    (StatusCode::OK, Html(final_html))
 }
 
 pub async fn start_server(
@@ -63,10 +57,12 @@ pub async fn start_server(
         .route("/events", get(sse_handler))
         // Favicon Route (zur Vermeidung des 404-Fehlers)
         .route("/favicon.ico", get(|| async { StatusCode::NO_CONTENT }))
+        // read Data
+        .route("/api/live", axum::routing::get(live_data))
         // Service für statische Dateien (CSS, JS, Bilder etc.)
         .nest_service("/static", static_files_service)
         // Alle Anfragen an /images/... werden an das Verzeichnis im image_path weitergeleitet
-        .nest_service("/images", image_service)
+        .nest_service("/static/images", image_service)
         .with_state(shared_state); // Hinzufügen der State-Weitergabe
                                    //       .with_state(app_state);
 

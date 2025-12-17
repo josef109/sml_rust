@@ -40,11 +40,13 @@ async fn main() -> anyhow::Result<()> {
 
     let (tx, _rx) = broadcast::channel(100);
     let shared_state = Arc::new(Mutex::new(AppState {
-        wirkleistung: 0.0,
-        zaehlerstand_diff: 0.0,
-        einspeisung: 0.0,
-        einspeisung_sts: false,
+        // power: 0.0,
+        // import_diff: 0.0,
+        // export: 0.0,
+        // export_sts: false,
         tx,
+        default_language: config.language.clone(),
+        rrd_path: config.rrd_path.clone(),
     }));
 
     let mqtt_client = mqtt::init_mqtt(&config).await;

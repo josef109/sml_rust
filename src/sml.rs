@@ -230,11 +230,11 @@ async fn process_sml_messages(
                     if val.obj_name == OBIS_ZAEHLERSTAND {
                         match val.value {
                             Value::I64(v) => {
-                                update_zaehlerstand(sensor, v as u64);
+                                update_import(sensor, v as u64);
                                 found_data = true;
                             }
                             Value::U64(v) => {
-                                update_zaehlerstand(sensor, v);
+                                update_import(sensor, v);
                                 found_data = true;
                             }
                             _ => {}
@@ -242,11 +242,11 @@ async fn process_sml_messages(
                     } else if val.obj_name == OBIS_WIRKLEISTUNG {
                         match val.value {
                             Value::I64(v) => {
-                                sensor.wirkleistung = v as i32;
+                                sensor.power = v as i32;
                                 found_data = true;
                             }
                             Value::I32(v) => {
-                                sensor.wirkleistung = v;
+                                sensor.power = v;
                                 found_data = true;
                             }
                             _ => {}
@@ -262,13 +262,13 @@ async fn process_sml_messages(
     }
 }
 
-fn update_zaehlerstand(sensor: &mut SensorData, val: u64) {
-    if sensor.zaehlerstand_alt == 0 {
-        sensor.zaehlerstand_alt = val;
+fn update_import(sensor: &mut SensorData, val: u64) {
+    if sensor.import_old == 0 {
+        sensor.import_old = val;
     }
-    sensor.zaehlerstand_diff = (val - sensor.zaehlerstand_alt) as u32;
-    sensor.zaehlerstand_alt = val;
-    sensor.zaehlerstand = val;
+    sensor.import_diff = (val - sensor.import_old) as u32;
+    sensor.import_old = val;
+    sensor.import = val;
 }
 
 async fn handle_logic_update(
@@ -277,8 +277,8 @@ async fn handle_logic_update(
     app_state: &SharedAppState,
     rrd_path: &Path,
 ) {
-    if sensor.wirkleistung < -500 && !sensor.einspeisung_sts {
-        sensor.einspeisung_sts = true;
+    if sensor.power < -500 && !sensor.export_sts {
+        sensor.export_sts = true;
         let _ = client
             .publish(
                 "homeassistant/binary_sensor/sml/feed/state",
@@ -287,8 +287,8 @@ async fn handle_logic_update(
                 "ON",
             )
             .await;
-    } else if sensor.wirkleistung > -100 && sensor.einspeisung_sts {
-        sensor.einspeisung_sts = false;
+    } else if sensor.power > -100 && sensor.export_sts {
+        sensor.export_sts = false;
         let _ = client
             .publish(
                 "homeassistant/binary_sensor/sml/feed/state",
@@ -300,29 +300,31 @@ async fn handle_logic_update(
     }
 
     let now = Instant::now();
-    let w = sensor.wirkleistung; //-sensor.wirkleistung;
+    let w = sensor.power; //-sensor.power;
     if let Some(last_time) = sensor.last_integration_time {
         let dt = now.duration_since(last_time).as_millis() as u32;
-        if w < 0 || sensor.wirkleistung_alt < 0 {
-            let p_avg = (((-sensor.wirkleistung_alt).max(0) + (-w).max(0)) / 2) as u32;
-            sensor.einspeisung += p_avg as u64 * dt as u64; // 1/10 W * ms     ms 1000  3600 h    // / 360.0; // 1/10 Wh
+        if w < 0 || sensor.power_old < 0 {
+            let p_avg = (((-sensor.power_old).max(0) + (-w).max(0)) / 2) as u32;
+            sensor.export += p_avg as u64 * dt as u64; // 1/10 W * ms     ms 1000  3600 h    // / 360.0; // 1/10 Wh
         }
     }
     sensor.last_integration_time = Some(now);
-    sensor.wirkleistung_alt = sensor.wirkleistung;
+    sensor.power_old = sensor.power;
+    sensor.export_diff = (sensor.export - sensor.export_old) as u32;
+    sensor.export_old = sensor.export;
 
     update_rrd(
         rrd_path,
-        sensor.zaehlerstand,
-        sensor.einspeisung / 2000000,
-        sensor.wirkleistung,
+        sensor.import,
+        sensor.export / 2000000,
+        sensor.power,
     );
 
     info!(
         "Bezug: {} Einspeisung: {} Wirkleistung: {}",
-        sensor.zaehlerstand as f64 / 10.0,
-        sensor.einspeisung as f32 / 36000000.0,
-        sensor.wirkleistung as f32 / 10.0
+        sensor.import as f64 / 10.0,
+        sensor.export as f32 / 36000000.0,
+        sensor.power as f32 / 10.0
     );
 
     let should_publish = match sensor.last_mqtt_publish {
@@ -332,12 +334,12 @@ async fn handle_logic_update(
 
     if should_publish {
         let json_payload = format!(
-            "{{\"Time\":\"{}\",\"bezug\":{}.{},\"einspeisung\":{}.{}}}",
+            "{{\"Time\":\"{}\",\"bezug\":{}.{},\"export\":{}.{}}}",
             Local::now().to_rfc3339(),
-            sensor.zaehlerstand / 10,
-            sensor.zaehlerstand % 10,
-            sensor.einspeisung / 36000000,
-            sensor.einspeisung % 36000000 / 3600000
+            sensor.import / 10,
+            sensor.import % 10,
+            sensor.export / 36000000,
+            sensor.export % 36000000 / 3600000
         );
         let _ = client
             .publish(
@@ -355,20 +357,22 @@ async fn handle_logic_update(
             "homeassistant/sensor/sml/wirkleistung/state",
             QoS::AtLeastOnce,
             false,
-            (sensor.wirkleistung / 10).to_string() + "." + &(sensor.wirkleistung % 10).to_string(),
+            (sensor.power / 10).to_string() + "." + &(sensor.power % 10).to_string(),
         )
         .await;
 
     match app_state.lock() {
         Ok(mut state) => {
-            state.wirkleistung = sensor.wirkleistung as f32 / 10.0;
-            state.zaehlerstand_diff = sensor.zaehlerstand_diff as f32 / 10.0;
+            // state.power = sensor.power as f32 / 10.0;
+            // state.import_diff = sensor.import_diff as f32 / 10.0;
             let _ = state.tx.send(SseData {
-                time: Local::now().format("%H:%M:%S").to_string(),
-                value: sensor.wirkleistung as f32 / 10.0,
-                value2: sensor.zaehlerstand_diff as f32 / 10.0,
-                total_energy: sensor.zaehlerstand as f64 / 10.0,
-                is_feed_in: sensor.einspeisung_sts,
+                time: Local::now(), //.format("%H:%M:%S").to_string(),
+                power: sensor.power,
+                import: sensor.import,
+                import_diff: sensor.import_diff,
+                export: sensor.export / 2000000,
+                export_diff: sensor.export_diff / 2000000,
+                is_feed_in: sensor.export_sts,
             });
         }
         Err(e) => {
