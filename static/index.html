@@ -4,147 +4,143 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Strommonitor</title>
-
+    <title>Strommonitor Dashboard</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.3.1/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 
 <body>
-    <nav class="navbar mb-4">
-        <div class="container d-flex justify-content-between">
-            <span class="navbar-brand">
-                <i class="fas fa-bolt mr-2"></i>Monitor
-            </span>
+    <nav class="navbar mb-3">
+        <div class="container-fluid d-flex justify-content-between">
+            <span class="navbar-brand"><i class="fas fa-bolt mr-2 text-warning"></i>Strommonitor</span>
+            <div class="text-muted small">
+                <i class="fas fa-clock mr-1"></i><span id="last-update">--:--:--</span>
+            </div>
         </div>
     </nav>
 
-    <div class="container">
-        <ul class="nav nav-pills mb-4 overflow-auto flex-nowrap">
-            <li class="nav-item"><a class="nav-link active" data-toggle="pill" href="#live">Live</a></li>
-            <li class="nav-item"><a class="nav-link" data-toggle="pill" href="#hour">1h</a></li>
-            <li class="nav-item"><a class="nav-link" data-toggle="pill" href="#day">24h</a></li>
-            <li class="nav-item"><a class="nav-link" data-toggle="pill" href="#week">Woche</a></li>
-            <li class="nav-item"><a class="nav-link" data-toggle="pill" href="#month">Monat</a></li>
-            <li class="nav-item"><a class="nav-link" data-toggle="pill" href="#status">Status</a></li>
-        </ul>
-
-        <div class="tab-content">
-            <div id="live" class="tab-pane active">
-                <div class="card">
-                    <div class="card-body" style="height:600px">
+    <div class="container-fluid px-3">
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card shadow-lg">
+                    <div class="card-body chart-wrapper">
                         <canvas id="liveChart"></canvas>
                     </div>
                 </div>
             </div>
+        </div>
 
-            <div id="hour" class="tab-pane fade text-center">
-                <div class="card">
-                    <div class="card-body">
-                        <img src="/static/images/power_hour.png" class="img-fluid">
+        <div class="row mb-4">
+            <div class="col-12 col-md-4 mb-3">
+                <div class="card stat-card h-100">
+                    <div class="stat-card-label">Aktuell</div>
+                    <div class="d-flex justify-content-center align-items-baseline my-2">
+                        <div class="stat-value" id="power">---</div>
+                        <div class="unit ml-2">W</div>
+                    </div>
+                    <div id="einspeisung-status" class="alert-status status-neutral mx-auto">
+                        <span id="einspeisung_text">---</span>
                     </div>
                 </div>
             </div>
 
-            <div id="day" class="tab-pane fade text-center">
-                <div class="card">
-                    <div class="card-body">
-                        <img src="/static/images/power_day.png" class="img-fluid">
-                    </div>
+            <div class="col-6 col-md-4 mb-3">
+                <div class="card stat-card h-100">
+                    <div class="stat-card-label">Bezug</div>
+                    <div class="stat-value-sm" id="import">---</div>
+                    <div class="unit-sm">Wh gesamt</div>
+                    <hr class="my-2 border-secondary">
+                    <div class="stat-value-sm text-success" id="import-diff">---</div>
+                    <div class="unit-sm">Wh / sampling</div>
                 </div>
             </div>
 
-            <div id="week" class="tab-pane fade text-center">
-                <div class="card">
-                    <div class="card-body">
-                        <img src="/static/images/power_week.png" class="img-fluid">
-                    </div>
+            <div class="col-6 col-md-4 mb-3">
+                <div class="card stat-card h-100">
+                    <div class="stat-card-label">Einspeisung</div>
+                    <div class="stat-value-sm" id="export">---</div>
+                    <div class="unit-sm">Wh gesamt</div>
+                    <hr class="my-2 border-secondary">
+                    <div class="stat-value-sm text-warning" id="export-diff">---</div>
+                    <div class="unit-sm">Wh / sampling</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-12 mb-3">
+                <h5 class="text-muted text-uppercase small font-weight-bold border-bottom border-secondary pb-2">
+                    Historischer Verlauf</h5>
+            </div>
+
+            <div class="col-12 mb-4">
+                <div class="card p-2">
+                    <div class="graph-label">Letzte Stunde</div>
+                    <img src="/static/images/power_hour.png" class="img-fluid rrd-graph rounded" alt="Stunde">
                 </div>
             </div>
 
-            <div id="month" class="tab-pane fade text-center">
-                <div class="card">
-                    <div class="card-body">
-                        <img src="/static/images/power_month.png" class="img-fluid">
-                    </div>
+            <div class="col-12 mb-4">
+                <div class="card p-2">
+                    <div class="graph-label">Letzte 24 Stunden</div>
+                    <img src="/static/images/power_day.png" class="img-fluid rrd-graph rounded" alt="Tag">
                 </div>
             </div>
 
-            <div id="status" class="tab-pane fade">
-                <div class="row">
-                    <div class="col-6 col-lg-3 mb-2">
-                        <div class="card stat-card">
-                            <div class="stat-card-label">Zählerstände</div>
-                            <div class="stat-label">Bezug</div>
-                            <div class="stat-value" id="import">---</div>
-                            <div class="unit">kWh</div>
-                            <div class="stat-label">Einspeisung</div>
-                            <div class="stat-value" id="export">---</div>
-                            <div class="unit">kWh</div>
-                        </div>
-                    </div>
-
-                    <div class="col-6 col-lg-3 mb-2">
-                        <div class="card stat-card">
-                            <div class="stat-card-label">Verbrauch</div>
-                            <div class="stat-label">Bezug</div>
-                            <div class="stat-value" id="import-diff">---</div>
-                            <div class="unit">Wh</div>
-                            <div class="stat-label">Einspeisung</div>
-                            <div class="stat-value" id="export-diff">---</div>
-                            <div class="unit">Wh</div>
-                        </div>
-                    </div>
-
-
-                    <div class="col-6 col-lg-3 mb-2">
-                        <div class="card stat-card">
-                            <div class="stat-card-label">Aktuell</div>
-                            <div class="stat-label">Leistung</div>
-                            <div class="stat-value" id="power">---</div>
-                            <div class="unit">W</div>
-                            <div class="stat-label">Netz</div>
-                            <div id="einspeisung-status" class="alert-status status-neutral">
-                                <span id="einspeisung_text">---</span>
-                            </div>
-                            <div class="unit">---</div>
-
-                        </div>
-                    </div>
+            <div class="col-12 mb-4">
+                <div class="card p-2">
+                    <div class="graph-label">Woche</div>
+                    <img src="/static/images/power_week.png" class="img-fluid rrd-graph rounded" alt="Woche">
                 </div>
+            </div>
 
-                <div class="text-right text-muted small mt-2">
-                    <i class="fas fa-clock mr-1"></i>
-                    <span id="last-update">--:--:--</span>
+            <div class="col-12 mb-4">
+                <div class="card p-2">
+                    <div class="graph-label">Monat</div>
+                    <img src="/static/images/power_month.png" class="img-fluid rrd-graph rounded" alt="Monat">
+                </div>
+            </div>
+        </div>
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-dark text-white">
+                        <i class="fas fa-history mr-2"></i>Historie (Letzte 30 Tage)
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-dark table-striped mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Datum</th>
+                                    <th class="text-right">Bezug <small>(Gesamt)</small></th>
+                                    <th class="text-right">Verbrauch</th>
+                                    <th class="text-right">Einspeisung <small>(Gesamt)</small></th>
+                                    <th class="text-right">Verlust</th>
+                                </tr>
+                            </thead>
+                            <tbody id="history-body"></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <footer class="footer mt-5">
-        <div class="container text-center">
-            <small>&copy; 2025 GPL-3.0</small>
-        </div>
+    <footer class="mt-5 py-4 text-center border-top border-secondary">
+        <small class="text-muted">Strommonitor Live Dashboard &copy; 2025</small>
     </footer>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.4.0/jquery.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.3.1/js/bootstrap.min.js"></script>
-
     <script src="https://cdn.jsdelivr.net/npm/chart.js@^4"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@^3"></script>
-
-
-    <!-- <script src="https://cdn.jsdelivr.net/npm/chart.js/dist/chart.min.js"></script> -->
 
     <script
         src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 
+    <script src="https://cdn.jsdelivr.net/npm/medium-zoom/dist/medium-zoom.min.js"></script>
 
-    <!-- <script src="https://cdn.jsdelivr.net/npm/chart.js/dist/chart.umd.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotations/src/index.min.js"></script> -->
     <script type="module" src="/static/app.js"></script>
-
 </body>
 
 </html>

@@ -2,98 +2,164 @@
     --bg-main: #0a0d11;
     --bg-panel: #11151b;
     --bg-panel-2: #151a21;
-
     --accent: #4f8cff;
     --text-main: #e6e9ee;
     --text-muted: #8b93a3;
 }
 
-/* Base */
 body {
     background: radial-gradient(1200px 600px at top, #121826 0%, #0a0d11 65%);
+    background-attachment: fixed;
     color: var(--text-main);
-    font-family: Inter, system-ui, sans-serif;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    min-height: 100vh;
 }
 
-/* Navbar */
 .navbar {
-    background: linear-gradient(180deg, #161c26, #0f131a);
+    background: rgba(16, 22, 32, 0.8);
+    backdrop-filter: blur(10px);
     border-bottom: 1px solid #1f2937;
+    position: sticky;
+    top: 0;
+    z-index: 1000;
 }
 
-/* Tabs */
-.nav-pills .nav-link {
-    color: var(--text-muted);
-    border-radius: 999px;
-}
-
-.nav-pills .nav-link.active {
-    background: linear-gradient(135deg, #2f5fb8, #4f8cff);
-    color: white;
-}
-
-/* Cards */
 .card {
     background: linear-gradient(180deg, var(--bg-panel-2), var(--bg-panel));
     border: 1px solid #1f2937;
-    border-radius: 14px;
-    box-shadow: 0 14px 32px rgba(0, 0, 0, .7);
+    border-radius: 16px;
+    overflow: hidden;
 }
 
+/* Chart */
+.chart-wrapper {
+    height: 300px;
+}
+
+@media (min-width: 768px) {
+    .chart-wrapper {
+        height: 600px;
+    }
+}
+
+/* Stats */
 .stat-card {
     text-align: center;
-    padding: 1.4rem;
-}
-
-.stat-label {
-    font-size: .7rem;
-    letter-spacing: .12em;
-    margin-top: 2.0rem;
-    text-transform: uppercase;
-    color: var(--text-muted);
+    padding: 1.5rem 1rem;
 }
 
 .stat-card-label {
-    font-size: 1rem;
-    letter-spacing: .2em;
+    font-size: 0.7rem;
+    letter-spacing: .15em;
     text-transform: uppercase;
     color: var(--text-muted);
+    font-weight: 600;
 }
 
 .stat-value {
-    font-size: 1.6rem;
+    font-size: 2.2rem;
     font-weight: 800;
+    color: #fff;
 }
 
-/* Status */
-.alert-status {
-    padding: .5rem;
-    border-radius: 8px;
+.stat-value-sm {
+    font-size: 1.3rem;
     font-weight: 700;
 }
 
+.unit {
+    font-size: 1rem;
+    color: var(--text-muted);
+}
+
+.unit-sm {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
+/* Status Badge */
+.alert-status {
+    padding: 0.4rem 1rem;
+    border-radius: 30px;
+    font-weight: 700;
+    font-size: 0.8rem;
+    display: inline-block;
+}
+
 .status-neutral {
-    background: #0b1220;
+    background: #1f2937;
     color: #9ca3af;
 }
 
 .status-export {
-    background: #1a120c;
+    background: rgba(240, 195, 109, 0.1);
     color: #f0c36d;
+    border: 1px solid rgba(240, 195, 109, 0.3);
 }
 
 .status-import {
-    background: #0b1a14;
+    background: rgba(60, 207, 145, 0.1);
     color: #3ccf91;
+    border: 1px solid rgba(60, 207, 145, 0.3);
 }
 
-.status-error {
-    background: #1a0c0c;
-    color: #ef6b6b;
-}
-
-/* Footer */
-.footer {
-    border-top: 1px solid #1f2937;
+/* History Graphs */
+.graph-label {
+    padding: 0.5rem;
+    font-size: 0.8rem;
     color: var(--text-muted);
+    font-weight: 600;
+}
+
+.rrd-graph {
+    width: 100%;
+    height: auto;
+    display: block;
+    filter: brightness(0.95);
+    border-radius: 8px;
+    /* NEU: Zeigt an, dass man zoomen kann */
+    cursor: zoom-in;
+    transition: filter 0.2s;
+}
+
+/* Optional: Macht das Bild etwas heller, wenn man mit der Maus drüberfährt */
+.rrd-graph:hover {
+    filter: brightness(1.0);
+}
+
+#history-body td {
+    vertical-align: middle;
+}
+
+.text-right {
+    text-align: right;
+}
+
+/* Container für horizontales Scrollen auf Handys */
+.table-responsive {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Tabelle kompakter machen */
+.table td,
+.table th {
+    padding: 0.5rem;
+    /* Weniger Padding für mehr Platz */
+    vertical-align: middle;
+    white-space: nowrap;
+    /* Verhindert hässliche Zeilenumbrüche in Zahlen */
+}
+
+/* Schriftgrößen optimieren */
+#history-body td {
+    font-size: 0.9rem;
+}
+
+.text-muted.small {
+    font-size: 0.75rem;
+    opacity: 0.6;
 }

@@ -1,4 +1,4 @@
-use chrono::Local;
+use chrono::{DateTime, Local, NaiveDate};
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -6,7 +6,7 @@ use tokio::sync::broadcast;
 
 #[derive(Clone, Serialize, Debug)]
 pub struct SseData {
-    pub time: chrono::DateTime<Local>,
+    pub time: DateTime<Local>,
     pub power: i32,       // Aktuelle Leistung (Watt)
     pub import: u64,      // Zählerstand Total (kWh)
     pub import_diff: u32, // Differenz (für Chart)
@@ -21,8 +21,9 @@ pub struct AppState {
     // pub export: f32,
     // pub export_sts: bool,
     pub tx: broadcast::Sender<SseData>,
-    pub default_language: String,
-    pub rrd_path: std::path::PathBuf,
+    //     pub default_language: String,
+    //     pub rrd_path: PathBuf,
+    //     pub daily_log_path: PathBuf,
 }
 
 pub type SharedAppState = Arc<Mutex<AppState>>;
@@ -39,23 +40,25 @@ pub struct SensorData {
     pub export_sts: bool,
     pub last_integration_time: Option<Instant>,
     pub last_mqtt_publish: Option<Instant>,
+    pub last_daily_log: NaiveDate,
     //pub sin: f32,
 }
 
 impl SensorData {
-    pub fn new() -> Self {
+    pub fn new(initial_export: u64) -> Self {
         Self {
             power: 0,
             power_old: 0,
             import: 0,
             import_old: 0,
             import_diff: 0,
-            export: 0,
-            export_old: 0,
+            export: initial_export,
+            export_old: initial_export,
             export_diff: 0,
             export_sts: true,
             last_integration_time: None,
             last_mqtt_publish: None,
+            last_daily_log: Local::now().date_naive(),
             // sin: 0.0,
         }
     }

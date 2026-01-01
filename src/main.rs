@@ -5,7 +5,7 @@ mod rrd;
 mod sml;
 mod web;
 
-use crate::config::Config;
+use crate::config::{get_config, Config, CONFIG};
 use crate::model::AppState;
 //use anyhow::Ok;
 use ::rrd::ops::version::librrd_version;
@@ -33,10 +33,15 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let config = Config::parse();
-    info!("Starting SML Service. Serial port: {}", config.serial_port);
+    CONFIG
+        .set(config)
+        .expect("Config konnte nicht gesetzt werden");
+
+    let config = get_config(); // Holt sich die Referenz direkt vom "Himmel"
+    info!("Starting SML Service. Serial port: {}", &config.serial_port);
 
     info!("Librrd version {}", librrd_version());
-    rrd::ensure_rrd(&config);
+    rrd::ensure_rrd();
 
     let (tx, _rx) = broadcast::channel(100);
     let shared_state = Arc::new(Mutex::new(AppState {
@@ -45,36 +50,28 @@ async fn main() -> anyhow::Result<()> {
         // export: 0.0,
         // export_sts: false,
         tx,
-        default_language: config.language.clone(),
-        rrd_path: config.rrd_path.clone(),
+        // default_language: config.language.clone(),
+        // rrd_path: config.rrd_path.clone(),
+        // daily_log_path: config.daily_log_path.clone(),
     }));
 
-    let mqtt_client = mqtt::init_mqtt(&config).await;
+    let mqtt_client = mqtt::init_mqtt().await;
 
     // A) Serial Reader
     let state_serial = shared_state.clone();
-    let config_serial = config.clone();
     let client_serial = mqtt_client.clone();
     tokio::spawn(async move {
-        sml::run_serial_loop(config_serial, state_serial, client_serial, token).await;
+        sml::run_serial_loop(state_serial, client_serial, token).await;
     });
 
     // B) RRD Graph Generator
-    let config_rrd = config.clone();
     tokio::spawn(async move {
-        rrd::run_graph_loop(config_rrd, graph_token).await;
+        rrd::run_graph_loop(graph_token).await;
     });
 
     // C) Webserver
-    let config_web = config.clone();
     let server_handle = tokio::spawn(async move {
-        if let Err(e) = web::start_server(
-            &config_web.server_addr,
-            &config_web.image_output_path,
-            shared_state,
-        )
-        .await
-        {
+        if let Err(e) = web::start_server(shared_state).await {
             error!("Webserver failed: {}", e);
         }
     });
@@ -91,6 +88,6 @@ async fn main() -> anyhow::Result<()> {
     info!("Shutting down application...");
     server_handle.abort();
 
-    rrd::save_rrd_on_shutdown(&config);
+    rrd::save_rrd_on_shutdown();
     Ok(())
 }

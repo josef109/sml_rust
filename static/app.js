@@ -1,109 +1,163 @@
 import { createLiveChart } from "./livechartmodule.js";
 
-
-
 const CHART_THEMES = {
-    neutral: { line: "#9ca3af", fill: "rgba(156,163,175,.15)", grid: "rgba(148,163,184,.15)" },
-    export: { line: "#f0c36d", fill: "rgba(240,195,109,.2)", grid: "rgba(240,195,109,.2)" },
-    import: { line: "#3ccf91", fill: "rgba(60,207,145,.2)", grid: "rgba(60,207,145,.2)" },
-    error: { line: "#ef6b6b", fill: "rgba(239,107,107,.2)", grid: "rgba(239,107,107,.25)" }
+    neutral: { line: "#9ca3af", fill: "rgba(156,163,175,.1)", grid: "rgba(148,163,184,.1)" },
+    export: { line: "#f0c36d", fill: "rgba(240,195,109,.15)", grid: "rgba(240,195,109,.1)" },
+    import: { line: "#3ccf91", fill: "rgba(60,207,145,.15)", grid: "rgba(60,207,145,.1)" },
+    error: { line: "#ef6b6b", fill: "rgba(239,107,107,.2)", grid: "rgba(239,107,107,.2)" }
 };
-
-let currentYMax = null;
 
 const ctx = document.getElementById("liveChart").getContext("2d");
+const { chart, pushData, applyChartTheme } = createLiveChart(ctx, CHART_THEMES.neutral);
 
-function updateGridStatus(type, text) {
-    const box = document.getElementById("einspeisung-status");
-    const lbl = document.getElementById("einspeisung_text");
-    box.className = "alert-status status-" + type;
-    lbl.textContent = text;
-    //applyChartTheme(type);
-}
-
-const { pushData } = createLiveChart(ctx, CHART_THEMES.import);
-
-// --- NEU: Initialisierung der Live-Daten ---
+// 1. Initialisierung: Letzte Daten laden
 async function initLiveChart() {
     try {
-        // Wir laden die letzten 360 Sekunden (6 Minuten), 
-        // was bei einem 3-Sekunden-Raster ca. 120 Datenpunkten entspricht.
-        const response = await fetch('/api/live?ds=Wirkleistung&seconds=360');
-        if (!response.ok) throw new Error("Fehler beim Laden der Initialdaten");
-
+        const response = await fetch('/api/live?ds=Wirkleistung&seconds=600');
         const history = await response.json();
-
-        // history sollte ein Array von Objekten sein, z.B. [{time: "12:00:01", value: 123.4}, ...]
-        // Je nachdem wie dein Rust-Handler live_data die Daten strukturiert:
-        history.forEach(point => {
-            pushData({
-                label: point[0], // Der Zeitstempel aus der RRD
-                power: point[1] / 10  // Der Wert (evtl. noch durch 10 teilen, falls nötig)
-            });
-            //console.log("Datum ", point[0]);
-        });
-
-        console.log("Historische Daten geladen:", history.length);
-    } catch (e) {
-        console.error("Initialisierungsfehler:", e);
-    }
+        history.forEach(p => pushData({ label: p[0], power: p[1] / 10 }));
+    } catch (e) { console.error("Initialisierung fehlgeschlagen", e); }
 }
 
-// Starte das Laden der alten Daten
 initLiveChart();
-// pushData({
-//     label: Date.now() - 20000, // Der Zeitstempel aus der RRD
-//     power: 100  // Der Wert (evtl. noch durch 10 teilen, falls nötig)
-// });
-// pushData({
-//     label: Date.now() - 10000, // Der Zeitstempel aus der RRD
-//     power: 200  // Der Wert (evtl. noch durch 10 teilen, falls nötig)
-// });
-// pushData({
-//     label: Date.now(), // Der Zeitstempel aus der RRD
-//     power: 300  // Der Wert (evtl. noch durch 10 teilen, falls nötig)
-// });
 
-// --- SSE-Integration ---
+let watchdogTimer;
+
+function startWatchdog() {
+    // Falls bereits ein Timer läuft, stoppen
+    clearTimeout(watchdogTimer);
+
+    // Nach 5 Sekunden ohne Daten das Error-Theme setzen
+    watchdogTimer = setTimeout(() => {
+        console.warn("Seit 5s keine Daten empfangen!");
+        applyChartTheme(CHART_THEMES.error);
+        chart.update("none");
+        document.getElementById("power").textContent = "OFFLINE";
+    }, 5000);
+}
+
+// 2. Echtzeit-Updates via SSE
 const eventSource = new EventSource("/events");
+eventSource.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    const p = data.power / 10;
+    const zeit = new Date(data.time);
+    startWatchdog();
 
-eventSource.onmessage = function (event) {
-    try {
-        const data = JSON.parse(event.data);
-        const zeit = new Date(data.time);
+    // Live-Chart Thema anpassen
+    if (p > 20) applyChartTheme(CHART_THEMES.import);
+    else if (p < -20) applyChartTheme(CHART_THEMES.export);
+    else applyChartTheme(CHART_THEMES.neutral);
 
-        pushData({
-            label: zeit,
-            power: data.power / 10,
-        });
-        document.getElementById("power").textContent = data.power / 10;
+    pushData({ label: zeit, power: p });
 
-        $('#last-update').text(zeit.toLocaleTimeString());
-        $('#export').text(data.export / 10)
-        $('#import').text(data.import / 10)
-        $('#export-diff').text(data.export_diff / 10)
-        $('#import-diff').text(data.import_diff / 10)
+    // UI-Elemente aktualisieren
+    document.getElementById("power").textContent = p.toFixed(1);
+    document.getElementById("last-update").textContent = zeit.toLocaleTimeString();
+    document.getElementById("import").textContent = (data.import / 10).toFixed(1);
+    document.getElementById("export").textContent = (data.export / 10).toFixed(1);
+    document.getElementById("import-diff").textContent = (data.import_diff / 10).toFixed(1);
+    document.getElementById("export-diff").textContent = (data.export_diff / 10).toFixed(1);
 
-        updateGridStatus(data.power > 0 ? "import" : "export", data.power > 0 ? "Bezug" : "Einspeisung");
-    } catch (e) {
-        console.error("Error processing SSE data:", e, event.data);
+    const box = document.getElementById("einspeisung-status");
+    const lbl = document.getElementById("einspeisung_text");
+    if (p > 0) {
+        box.className = "alert-status status-import";
+        lbl.textContent = "Netzbezug";
+    } else {
+        box.className = "alert-status status-export";
+        lbl.textContent = "Einspeisung";
     }
 };
 
-/* Demo */
-// setInterval(() => {
-//     const x = Math.floor((Math.random() - 0.1) * 7000) / 10.0;
-//     const v = Math.floor((Math.sin(new Date().getSeconds() / 60 * Math.PI) - 0.1) * 70000) / 10.0;
+// 3. Alle Verlaufs-Bilder regelmäßig neu laden
+function refreshAllGraphs() {
+    const ts = Date.now();
+    $('.rrd-graph').each(function () {
+        const baseSrc = $(this).attr('src').split('?')[0];
+        $(this).attr('src', baseSrc + '?t=' + ts);
+    });
+    console.log("Dashboard Grafiken aktualisiert: " + new Date().toLocaleTimeString());
+}
 
-//     //addLiveValue(new Date().toLocaleTimeString(), v);
-//     document.getElementById("power").textContent = v;
+// Alle 60 Sekunden auffrischen
+setInterval(refreshAllGraphs, 60000);
 
-//     $('#last-update').text(new Date().toLocaleTimeString());
-//     $('#export').text(10000.0)
-//     $('#import').text(100.0)
-//     updateGridStatus(v > 0 ? "import" : "export", v > 0 ? "Bezug" : "Einspeisung");
-//     pushData({
-//         label: new Date().toLocaleTimeString(),
-//         power: x,
-//     });
-// }, 2000);
+startWatchdog();
+
+if (typeof mediumZoom === 'function') {
+
+    mediumZoom('.rrd-graph', {
+        margin: 24,          // Abstand zum Bildschirmrand beim Zoomen
+        background: '#0a0d11', // Dunkler Hintergrund passend zum Theme
+        scrollOffset: 0,     // Verhindert Scrollen beim Zoomen
+    });
+
+    console.log("Zoom-Funktion für Graphen aktiviert.");
+} else {
+    console.warn("medium-zoom Bibliothek wurde nicht gefunden.");
+}
+
+async function updateHistory() {
+    try {
+        const response = await fetch('/api/history');
+        const data = await response.json();
+        const container = document.getElementById('history-body');
+        container.innerHTML = '';
+
+        // Wir iterieren durch die Daten
+        data.forEach((row, index) => {
+            const tr = document.createElement('tr');
+
+            // Aktuelle Zählerstände (in 0.1 Wh Einheiten laut deinem Rust-Code)
+            const currentImport = parseInt(row[1]);
+            const currentExport = parseInt(row[2]);
+
+            // Holen den Stand vom "Vortag" (der in der Liste danach kommt, da neueste zuerst)
+            const nextRow = data[index + 1];
+
+            let diffImport = "---";
+            let diffExport = "---";
+
+            if (nextRow) {
+                const prevImport = parseInt(nextRow[1]);
+                const prevExport = parseInt(nextRow[2]);
+
+                // Berechnung der Differenz (Verbrauch/Einspeisung des Tages)
+                // Umrechnung von 0.1 Wh in Wh (/ 10) oder kWh (/ 10000)
+                diffImport = ((currentImport - prevImport) / 10).toFixed(1);
+                diffExport = ((currentExport - prevExport) / 10).toFixed(1);
+            }
+            else
+                return;
+
+            // Absolute Zählerstände für die Anzeige (in Wh)
+            const importTotal = (currentImport / 10).toFixed(1);
+            const exportTotal = (currentExport / 10).toFixed(1);
+
+            // Datum formatieren
+            let datum = new Date(row[0]);
+            datum.setDate(datum.getDate() - 1);
+
+            //const d = setDate(new Date(row[0]).getDate());
+            const date = datum.toLocaleDateString("de-DE", {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric'
+            });
+
+            tr.innerHTML = `
+                <td>${date}</td>
+                <td class="text-right text-muted small">${importTotal}</td>
+                <td class="text-right font-weight-bold text-success">${diffImport}</td>
+                <td class="text-right text-muted small">${exportTotal}</td>
+                <td class="text-right font-weight-bold text-warning">${diffExport}</td>
+            `;
+            container.appendChild(tr);
+        });
+    } catch (e) {
+        console.error("History error:", e);
+    }
+}
+
+updateHistory();

@@ -1,11 +1,12 @@
-use chrono::Local;
+use chrono::{Local, NaiveDate};
 use rumqttc::{AsyncClient, QoS};
 //use std::f32::consts::PI;
 use std::io::Read;
 //use sml_rs::transport::SmlMessages;
-use std::path::Path;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use std::{str, string};
 
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
@@ -17,8 +18,10 @@ use sml_rs::parser::complete::File as SmlFile;
 // use sml_rs::parser::complete::MessageBody::GetListResponse;
 use sml_rs::parser::common::Value;
 // wichtig
+use anyhow::Context;
+use thiserror::Error;
 
-use crate::config::Config;
+use crate::config::get_config;
 use crate::model::{SensorData, SharedAppState, SseData};
 use crate::rrd::update_rrd;
 
@@ -99,60 +102,59 @@ const OBIS: [BitsNStrings; 11] = [
     },
 ];
 
+#[derive(Error, Debug)]
+pub enum SmlError {
+    #[error("Serieller Port Fehler: {0}")]
+    SerialPort(#[from] serialport::Error),
+
+    #[error("IO Fehler: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("SML Dekodierungsfehler")]
+    Decode,
+
+    #[error("SML Parsingfehler: {0}")]
+    Parse(String),
+
+    #[error("Ungültiges Format in der Historien-Datei: {0}")]
+    HistoryFormat(String),
+}
+
 pub async fn run_serial_loop(
-    config: Config,
     app_state: SharedAppState,
     mqtt_client: AsyncClient,
     token: CancellationToken,
 ) {
-    let mut sensor = SensorData::new();
-
-    // let buf = ArrayBuf::<4069>::default();
-    // let mut decoder = sml_rs::transport::Decoder::from_buf(buf);
-
+    let config = get_config();
+    let mut sensor = SensorData::new(load_initial_values());
     let mut decoder = sml_rs::transport::Decoder::<Vec<u8>>::new();
 
-    info!("Starting SML Reader Loop on {}", config.serial_port);
-
-    loop {
-        if token.is_cancelled() {
-            break;
-        }
+    while !token.is_cancelled() {
+        // Port öffnen mit Kontext
         let mut port = match serialport::new(&config.serial_port, 9600)
             .timeout(Duration::from_secs(5))
             .open()
         {
-            Ok(p) => {
-                info!("Serial interface {} opened", config.serial_port);
-                p
-            }
+            Ok(p) => p,
             Err(e) => {
                 error!(
-                    "Error opening {}: {}. Retrying in 5s...",
+                    "Serial Port {} Fehler: {}. Retry in 5s...",
                     config.serial_port, e
                 );
                 tokio::select! {
-                    // Option 1: Warte 30 Sekunden
-                    _ =  sleep(Duration::from_secs(5)) => {
-                        // Führe nach dem Sleep den Haupt-Code aus
-                    }
-                    // Option 2: Warte auf das Abbruch-Token
-                    _ = token.cancelled() => {
-                        info!("Graph loop received cancellation signal. Exiting.");
-                        break; // Schleife verlassen und Funktion beenden
-                    }
+                    _ = sleep(Duration::from_secs(5)) => continue,
+                    _ = token.cancelled() => break,
                 }
-                continue;
             }
         };
 
-        let mut serial_buf = [0u8; 256];
+        let mut serial_buf = [0u8; 1024]; // Größerer Puffer für Effizienz
 
         loop {
             if token.is_cancelled() {
-                info!("Close Port {}...", config.serial_port);
                 return;
             }
+
             match port.read(&mut serial_buf) {
                 Ok(n) if n > 0 => {
                     for &byte in &serial_buf[..n] {
@@ -165,30 +167,29 @@ pub async fn run_serial_loop(
                                             &mut sensor,
                                             &mqtt_client,
                                             &app_state,
-                                            &config.rrd_path,
                                         )
                                         .await;
                                     }
-                                    Err(e) => {
-                                        error!("Parsing error: {:?}", e);
-                                        //None
-                                    }
-                                };
+                                    Err(e) => error!("SML Parse Fehler: {:?}", e),
+                                }
                             }
-                            Ok(None) => {}
+                            Ok(None) => {} // Frame noch nicht komplett
                             Err(e) => {
-                                error!("Decode Error: {:?}", e);
+                                error!("SML Decode Fehler: {:?}.", e);
                             }
                         }
                     }
                 }
-                Ok(_) => {}
+                Ok(_) => {} // Timeout oder 0 Bytes
+                Err(e) if e.kind() == std::io::ErrorKind::TimedOut => continue,
                 Err(e) => {
-                    error!("Serial Port Read Error: {:?}", e);
-                    break;
+                    error!(
+                        "Hardware-Lesefehler am Port: {:?}. Versuche Reconnect...",
+                        e
+                    );
+                    break; // Inneren Loop verlassen -> Reconnect
                 }
             }
-            sleep(Duration::from_millis(10)).await;
         }
     }
 }
@@ -199,7 +200,6 @@ async fn process_sml_messages(
     sensor: &mut SensorData,
     client: &AsyncClient,
     app_state: &SharedAppState,
-    rrd_path: &Path,
 ) {
     let mut found_data = false;
 
@@ -258,7 +258,7 @@ async fn process_sml_messages(
     }
 
     if found_data {
-        handle_logic_update(sensor, client, app_state, rrd_path).await;
+        handle_logic_update(sensor, client, app_state).await;
     }
 }
 
@@ -275,8 +275,8 @@ async fn handle_logic_update(
     sensor: &mut SensorData,
     client: &AsyncClient,
     app_state: &SharedAppState,
-    rrd_path: &Path,
 ) {
+    let config = get_config(); // Holt sich die Referenz direkt vom "Himmel"
     if sensor.power < -500 && !sensor.export_sts {
         sensor.export_sts = true;
         let _ = client
@@ -313,17 +313,19 @@ async fn handle_logic_update(
     sensor.export_diff = (sensor.export - sensor.export_old) as u32;
     sensor.export_old = sensor.export;
 
-    update_rrd(
-        rrd_path,
-        sensor.import,
-        sensor.export / 2000000,
-        sensor.power,
-    );
+    let rrd_import = sensor.import;
+    let rrd_export = sensor.export / 2000000;
+    let rrd_power = sensor.power;
 
+    tokio::task::spawn_blocking(move || {
+        if let Err(e) = update_rrd(rrd_import, rrd_export, rrd_power) {
+            error!("RRD Update fehlgeschlagen: {:?}", e);
+        }
+    });
     info!(
         "Bezug: {} Einspeisung: {} Wirkleistung: {}",
         sensor.import as f64 / 10.0,
-        sensor.export as f32 / 36000000.0,
+        sensor.export as f32 / 2000000.0,
         sensor.power as f32 / 10.0
     );
 
@@ -334,12 +336,12 @@ async fn handle_logic_update(
 
     if should_publish {
         let json_payload = format!(
-            "{{\"Time\":\"{}\",\"bezug\":{}.{},\"export\":{}.{}}}",
+            "{{\"Time\":\"{}\",\"bezug\":{}.{},\"einspeisung\":{}.{}}}",
             Local::now().to_rfc3339(),
             sensor.import / 10,
             sensor.import % 10,
-            sensor.export / 36000000,
-            sensor.export % 36000000 / 3600000
+            sensor.export / 20000000,
+            sensor.export % 20000000 / 2000000
         );
         let _ = client
             .publish(
@@ -362,7 +364,7 @@ async fn handle_logic_update(
         .await;
 
     match app_state.lock() {
-        Ok(mut state) => {
+        Ok(state) => {
             // state.power = sensor.power as f32 / 10.0;
             // state.import_diff = sensor.import_diff as f32 / 10.0;
             let _ = state.tx.send(SseData {
@@ -379,4 +381,90 @@ async fn handle_logic_update(
             error!("App State Mutex Poisoned: {}", e);
         }
     }
+
+    // Innerhalb von handle_logic_update:
+    let now = Local::now();
+    let today = now.date_naive();
+
+    // Prüfen ob ein neuer Tag angebrochen ist
+    // Innerhalb von handle_logic_update:
+    if sensor.last_daily_log != today {
+        let path = &config.daily_log_path;
+
+        let result: anyhow::Result<()> = (|| {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+
+            let file_exists = path.exists();
+            let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+
+            if !file_exists {
+                writeln!(file, "Datum;Bezug_Wh;Einspeisung_Wh")?;
+            }
+
+            writeln!(
+                file,
+                "{};{};{}",
+                today,
+                sensor.import,
+                sensor.export / 2000000
+            )?;
+            Ok(())
+        })();
+
+        match result {
+            Ok(_) => {
+                sensor.last_daily_log = today;
+                info!("Tagesstatistik erfolgreich gespeichert.");
+            }
+            Err(e) => error!("Konnte Tagesstatistik nicht schreiben: {:?}", e),
+        }
+    }
+}
+
+pub fn load_initial_values() -> u64 {
+    // Wir versuchen zu laden, bei jedem Fehler loggen wir ihn und starten mit 0
+    match try_load_history() {
+        Ok(export) => export,
+        Err(e) => {
+            info!("Starte mit Initialwert 0 (Grund: {})", e);
+            0
+        }
+    }
+}
+
+fn try_load_history() -> anyhow::Result<u64> {
+    let config = get_config();
+    let path = PathBuf::from(&config.daily_log_path);
+
+    if !path.exists() {
+        anyhow::bail!("Datei existiert noch nicht");
+    }
+
+    let content = std::fs::read_to_string(&path)
+        .with_context(|| format!("Fehler beim Lesen der Datei {:?}", path))?;
+
+    let last_line = content
+        .lines()
+        .rfind(|l| !l.trim().is_empty())
+        .context("Datei ist leer oder enthält nur Leerzeilen")?;
+
+    if last_line.starts_with("Datum") {
+        return Ok(0);
+    }
+
+    let parts: Vec<&str> = last_line.split(';').collect();
+    if parts.len() < 3 {
+        return Err(
+            SmlError::HistoryFormat(format!("Zu wenig Spalten in Zeile: '{}'", last_line)).into(),
+        );
+    }
+
+    let export = parts[2]
+        .parse::<u64>()
+        .with_context(|| format!("Ungültiger Export-Wert in Zeile: '{}'", last_line))?;
+
+    info!("Historie geladen: Export steht bei {}", export);
+    Ok(export * 2000000)
 }

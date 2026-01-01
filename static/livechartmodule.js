@@ -141,11 +141,11 @@ export function createLiveChart(ctx, theme) {
         borderDashOffset: 0,
         borderWidth: 1,
         label: {
-            backgroundColor: 'transparent',
+            backgroundColor: "#151a21",
             color: (ctx) => ctx.chart.data.datasets[0].borderColor,
             display: true,
-            content: (ctx) => '0 ' + average(ctx).toFixed(0) + ' W',
-            position: 'end'
+            content: (ctx) => 'Ø ' + average(ctx).toFixed(0) + ' W',
+            position: 'start'
         },
         scaleID: 'y',
         value: (ctx) => average(ctx)
@@ -191,15 +191,15 @@ export function createLiveChart(ctx, theme) {
         //     bottom: 12
         // },
         position: {
-            x: (ctx) => maxIndex(ctx) <= 3 ? 'start' : maxIndex(ctx) >= ctx.chart.data.datasets[0].data.length - 10 ? 'end' : 'center',
+            x: (ctx) => maxIndex(ctx) <= 10 ? 'start' : maxIndex(ctx) >= ctx.chart.data.datasets[0].data.length - 10 ? 'end' : 'center',
             y: 'end'
         },
         // xValue: (ctx) => maxLabel(ctx),
         // yAdjust: -6,
         // yValue: (ctx) => maxValue(ctx)
-        xAdjust: (ctx) => maxIndex(ctx) <= 3 ? 60 : maxIndex(ctx) >= 10 ? -60 : 0,
+        xAdjust: (ctx) => maxIndex(ctx) <= 10 ? 60 : maxIndex(ctx) >= ctx.chart.data.datasets[0].data.length - 10 ? -60 : 0,
         xValue: (ctx) => maxLabel(ctx),
-        yAdjust: -5,
+        yAdjust: -20,
         yValue: (ctx) => maxValue(ctx)
     };
 
@@ -222,20 +222,39 @@ export function createLiveChart(ctx, theme) {
         //     bottom: 12
         // },
         position: {
-            x: (ctx) => minIndex(ctx) <= 3 ? 'start' : minIndex(ctx) >= ctx.chart.data.datasets[0].data.length - 10 ? 'end' : 'center',
+            x: (ctx) => minIndex(ctx) <= 10 ? 'start' : minIndex(ctx) >= ctx.chart.data.datasets[0].data.length - 10 ? 'end' : 'center',
             y: 'end'
         },
         // xValue: (ctx) => maxLabel(ctx),
         // yAdjust: -6,
         // yValue: (ctx) => maxValue(ctx)
-        xAdjust: (ctx) => minIndex(ctx) <= 3 ? 60 : minIndex(ctx) >= 10 ? -60 : 0,
+        xAdjust: (ctx) => minIndex(ctx) <= 10 ? 60 : minIndex(ctx) >= ctx.chart.data.datasets[0].data.length - 10 ? -60 : 0,
         xValue: (ctx) => minLabel(ctx),
-        yAdjust: 40,
+        yAdjust: 50,
         yValue: (ctx) => minValue(ctx)
     };
 
 
     /* ---------------------------- Chart Init ----------------------------- */
+
+    const WINDOW = 6 * 60 * 1000;
+
+    function createTimeWindow(windowMs) {
+        let t = 0;
+
+        return {
+            min() {
+                t = Math.floor(Date.now() / 1000) * 1000 - 1000;
+                return t - windowMs;
+            },
+            max() {
+                return t || Math.floor(Date.now() / 1000) * 1000 - 1000;
+            }
+        };
+    }
+
+    const timeWindow = createTimeWindow(WINDOW);
+
 
     const chart = new Chart(ctx, {
         type: "line",
@@ -266,9 +285,6 @@ export function createLiveChart(ctx, theme) {
                 //     pointRadius: 0
                 // },
                 // {
-                //     id: DATASETS.AVG,
-                //     data: [],
-                //     borderDash: [6, 6],
                 //     borderWidth: 1,
                 //     pointRadius: 0
                 // },
@@ -316,8 +332,10 @@ export function createLiveChart(ctx, theme) {
                     grid: { color: theme.grid },
                     ticks: {
                         color: "#8b93a3",
-                        autoSkip: true, // Überspringt Labels, wenn es zu voll wird
-                        maxTicksLimit: 18 // Maximale Anzahl an sichtbaren Zeitstempeln
+                        autoSkip: true,         // Überspringt Labels, wenn es zu voll wird
+                        //maxTicksLimit: 18,  // Maximale Anzahl an sichtbaren Zeitstempeln
+                        maxRotation: 0,
+                        autoSkipPadding: 10,
                     },
                     type: "time",
                     time: {
@@ -328,7 +346,9 @@ export function createLiveChart(ctx, theme) {
                         displayFormats: {
                             "second": "HH:mm:ss"
                         }
-                    }
+                    },
+                    min: timeWindow.min,
+                    max: timeWindow.max
                 },
                 y: {
                     grid: {
@@ -341,6 +361,13 @@ export function createLiveChart(ctx, theme) {
                     //beginAtZero: true,
                     suggestedMax: 1000,
                     suggestedMin: -50,
+                    afterDataLimits(scale) {
+                        const range = scale.max - scale.min;
+                        const padding = range * 0.1; // 10 % Luft
+
+                        scale.max += padding;
+                        scale.min -= padding;
+                    }
                 }
             }
         }
@@ -377,10 +404,23 @@ export function createLiveChart(ctx, theme) {
         data.labels.push(label);
 
         datasetCache.get(DATASETS.LIVE).data.push(power);
-        if (datasetCache.get(DATASETS.LIVE).data.length > 120) {
+
+
+        while (data.labels.length > 2 && (new Date(data.labels[1]) < chart.scales.x.ticks[0].value)) {
             data.labels.shift();
             datasetCache.get(DATASETS.LIVE).data.shift();
         }
+
+        // 'x' ist die ID der Achse (Standard ist meistens 'x')
+        const firstTick = chart.scales.x.ticks[0];
+
+        console.log("Wert des ersten Grid-Ticks:", firstTick.value);
+        console.log("Anzeigetext des ersten Grid-Ticks:", firstTick.label);
+
+        // if (datasetCache.get(DATASETS.LIVE).data.length > 120) {
+        //     data.labels.shift();
+        //     datasetCache.get(DATASETS.LIVE).data.shift();
+        // }
 
 
         // const d = datasetCache.get(DATASETS.LIVE).data;
@@ -399,7 +439,7 @@ export function createLiveChart(ctx, theme) {
         // const avg = sum / d.length;
         // datasetCache.get(DATASETS.AVG).data = data.labels.map(() => avg);
 
-        const yTicks = chart.options.scales.y.ticks;
+        //const yTicks = chart.options.scales.y.ticks;
 
         // if (max > (yTicks.max ?? 0)) {
         //     yTicks.max = Math.ceil(max / 500) * 500;
@@ -416,6 +456,7 @@ export function createLiveChart(ctx, theme) {
     return {
         chart,
         pushData,
-        destroy
+        destroy,
+        applyChartTheme
     };
 }

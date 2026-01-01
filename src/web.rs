@@ -1,3 +1,4 @@
+use crate::config::get_config;
 use crate::model::SharedAppState;
 use crate::rrd::live_data;
 use axum::{
@@ -8,7 +9,7 @@ use axum::{
         Html, IntoResponse,
     },
     routing::get,
-    Router,
+    Json, Router,
 };
 use tokio::{fs::File, io::AsyncReadExt};
 use tokio_stream::wrappers::BroadcastStream;
@@ -18,11 +19,9 @@ use tracing::info;
 
 // --- 5. Handler für die HTML-Seite (Liest index.html aus dem static-Ordner) ---
 
-async fn html_handler(State(state): State<SharedAppState>) -> impl IntoResponse {
-    let lang = {
-        let s = state.lock().unwrap();
-        s.default_language.clone()
-    };
+async fn html_handler() -> impl IntoResponse {
+    let config = get_config(); // Holt sich die Referenz direkt vom "Himmel"
+    let lang = &config.language;
 
     let mut file = match File::open("static/index.html").await {
         Ok(f) => f,
@@ -39,11 +38,10 @@ async fn html_handler(State(state): State<SharedAppState>) -> impl IntoResponse 
     (StatusCode::OK, Html(final_html))
 }
 
-pub async fn start_server(
-    addr: &str,
-    image_path: &str,
-    shared_state: SharedAppState,
-) -> anyhow::Result<()> {
+pub async fn start_server(shared_state: SharedAppState) -> anyhow::Result<()> {
+    let config = get_config(); // Holt sich die Referenz direkt vom "Himmel"
+    let image_path = &config.image_output_path;
+    let addr = &config.server_addr;
     // 1. Service für das Standard-Static-Verzeichnis ('static')
     let static_files_service = ServeDir::new("static");
 
@@ -58,7 +56,8 @@ pub async fn start_server(
         // Favicon Route (zur Vermeidung des 404-Fehlers)
         .route("/favicon.ico", get(|| async { StatusCode::NO_CONTENT }))
         // read Data
-        .route("/api/live", axum::routing::get(live_data))
+        .route("/api/live", get(live_data))
+        .route("/api/history", get(get_history))
         // Service für statische Dateien (CSS, JS, Bilder etc.)
         .nest_service("/static", static_files_service)
         // Alle Anfragen an /images/... werden an das Verzeichnis im image_path weitergeleitet
@@ -90,4 +89,28 @@ async fn sse_handler(
     });
 
     Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default())
+}
+
+pub async fn get_history() -> impl IntoResponse {
+    let config = get_config(); // Holt sich die Referenz direkt vom "Himmel"
+    let path = &config.daily_log_path;
+
+    if !path.exists() {
+        return Json(vec![] as Vec<Vec<String>>);
+    }
+
+    let content = std::fs::read_to_string(path).unwrap_or_default();
+
+    // FIX: Erst collecten, dann rev()
+    let rows: Vec<Vec<String>> = content
+        .lines()
+        .collect::<Vec<_>>() // Alle Zeilen in eine Vec laden
+        .into_iter()
+        .skip(1) // Header überspringen
+        .rev()
+        .take(31) // Letzte 30 Tage
+        .map(|line| line.split(';').map(|s| s.to_string()).collect())
+        .collect();
+
+    Json(rows)
 }

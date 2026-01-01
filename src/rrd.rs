@@ -1,27 +1,30 @@
-use crate::config::Config;
-use crate::model::SharedAppState;
-use axum::extract::{Query, State};
+use crate::config::get_config;
+use axum::extract::Query;
 use axum::Json;
+
 use chrono::{DateTime, Local, TimeZone};
-//use chrono::format::Numeric;
 use chrono::{Datelike, Months, NaiveTime, Timelike, Utc};
-use rrd::ops::fetch;
+
 use serde::Deserialize;
 use tokio::time::sleep;
 use tokio::time::Duration;
 use tokio_util::sync::CancellationToken;
 
+use rrd::ops::fetch;
 use rrd::ops::graph::elements::{AreaColor, ColorWithLegend, Legend};
 use rrd::ops::graph::props::{Labels, Size, UnitsExponent};
 use rrd::ops::graph::{self, elements, props};
-//use rrd::ConsolidationFn;
 use rrd::{
     ops::{create, graph::elements::VarName, graph::props::ImageFormat, update},
     ConsolidationFn,
 };
+
 use std::error::Error;
 use std::path::{Path, PathBuf};
+
 use tracing::{debug, error, info};
+
+use anyhow::Context;
 
 type UtcDateTime = chrono::DateTime<chrono::Utc>;
 
@@ -37,7 +40,8 @@ enum Language {
     En,
 }
 
-pub fn save_rrd_on_shutdown(config: &Config) {
+pub fn save_rrd_on_shutdown() {
+    let config = get_config(); // Holt sich die Referenz direkt vom "Himmel"
     if Path::new(&config.rrd_path).exists() {
         match std::fs::copy(&config.rrd_path, &config.rrd_backup_path) {
             Ok(bytes_copied) => {
@@ -53,7 +57,8 @@ pub fn save_rrd_on_shutdown(config: &Config) {
     }
 }
 
-pub fn ensure_rrd(config: &Config) {
+pub fn ensure_rrd() {
+    let config = get_config(); // Holt sich die Referenz direkt vom "Himmel"
     if !Path::new(&config.rrd_path).exists() {
         // file present?
         if let Some(parent_dir) = Path::new(&config.rrd_path).parent() {
@@ -122,21 +127,16 @@ pub fn ensure_rrd(config: &Config) {
     }
 }
 
-pub async fn live_data(
-    State(state): State<SharedAppState>,
-    Query(q): Query<LiveQuery>,
-) -> Json<Vec<(DateTime<Local>, i32)>> {
-    let rrd_path = {
-        let s = state.lock().unwrap();
-        s.rrd_path.clone()
-    };
+pub async fn live_data(Query(q): Query<LiveQuery>) -> Json<Vec<(DateTime<Local>, i32)>> {
+    let config = get_config(); // Holt sich die Referenz direkt vom "Himmel"
+    let rrd_path = &config.rrd_path;
 
     let now = chrono::Utc::now();
     let start = now - Duration::from_secs(q.seconds);
 
     // Fetch ausführen
     let rc = fetch::fetch(
-        &rrd_path,
+        rrd_path,
         ConsolidationFn::Avg,
         start,
         now,
@@ -180,25 +180,30 @@ pub async fn live_data(
     }
 }
 
-pub fn update_rrd(path: &Path, import: u64, export: u64, power: i32) {
-    let rc = update::update_all(
+pub fn update_rrd(import: u64, export: u64, power: i32) -> anyhow::Result<()> {
+    let config = get_config(); // Holt sich die Referenz direkt vom "Himmel"
+    let path = &config.rrd_path;
+    update::update_all(
         path,
         update::ExtraFlags::empty(),
         &[(
             update::BatchTime::Now,
             &[import.into(), export.into(), (power as f64).into()],
         )],
-    );
-    match rc {
-        Ok(_) => info!("Ok"),
-        Err(err) => error!("Not ok: {err}"),
-    }
+    )
+    .context(format!(
+        "Konnte RRD-Datenbank unter {:?} nicht aktualisieren",
+        path
+    ))?;
+
+    Ok(())
 }
 
-pub async fn run_graph_loop(config: Config, token: CancellationToken) {
+pub async fn run_graph_loop(token: CancellationToken) {
     let mut last_hour = Local::now().hour();
     let mut last_month = Local::now().month();
     let mut first_loop = false;
+    let config = get_config(); // Holt sich die Referenz direkt vom "Himmel"
     let lang_enum = if config.language == "en" {
         Language::En
     } else {
@@ -537,8 +542,8 @@ fn generate_graph(
 
     let graph_props = props::GraphProps {
         size: Size {
-            width: Some(1024),
-            height: Some(612),
+            width: Some(1870),
+            height: Some(886),
             ..Default::default()
         },
         labels: Labels {
