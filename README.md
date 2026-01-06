@@ -12,7 +12,8 @@ The project is suitable for embedded devices (e.g. Raspberry Pi), servers, and c
 * **Graph Generation:** Automatically generates hourly, daily, and weekly PNG charts (English & German).
 * **Home Assistant Ready:** Auto-discovery and state publishing via MQTT.
 * **Feed-in Calculation:** Logic to calculate energy export even if the meter only provides signed power values.
-
+---
+![Liveview](doc/liveview.png)
 ---
 
 ## 🏗 System Architecture
