@@ -13,3 +13,4 @@
 - Add example SML telegrams
 - Document output formats
 - Add metrics / monitoring section
+- Translations.

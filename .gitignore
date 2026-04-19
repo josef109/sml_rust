@@ -1,6 +1,5 @@
-/target/
+/target
 Cargo.lock
 ehz.rrd
-/qemu/
-/bak/
-
+/qemu
+/bak

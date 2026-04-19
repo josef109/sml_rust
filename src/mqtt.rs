@@ -35,15 +35,15 @@ async fn send_mqtt_config(client: &AsyncClient) {
     let configs = vec![
         (
             "homeassistant/sensor/sml/power/config",
-            r#"{"unique_id": "sml.power","device_class": "power", "name": "Wirkleistung", "state_topic": "homeassistant/sensor/sml/wirkleistung/state","unit_of_measurement": "W"}"#,
+            r#"{"unique_id": "sml.power", "device_class": "power", "name": "Wirkleistung", "state_topic": "homeassistant/sensor/sml/wirkleistung/state", "unit_of_measurement": "W", "value_template": "{{ value_json / 10 }}"}"#,
         ),
         (
             "homeassistant/sensor/sml/bezug/config",
-            r#"{"unique_id": "sml.bezug","state_class": "total_increasing", "device_class": "energy", "name": "Netzbezug", "state_topic": "homeassistant/sensor/sml/zaehler/state","unit_of_measurement": "Wh", "value_template": "{{ value_json.bezug}}"}"#,
+            r#"{"unique_id": "sml.bezug", "state_class": "total_increasing", "device_class": "energy", "name": "Netzbezug", "state_topic": "homeassistant/sensor/sml/zaehler/state", "unit_of_measurement": "Wh", "value_template": "{{ value_json.bezug / 10 }}"}"#,
         ),
         (
             "homeassistant/sensor/sml/einspeisung/config",
-            r#"{"unique_id": "sml.einspeisung","state_class": "total_increasing", "device_class": "energy", "name": "Netzeinspeisung", "state_topic": "homeassistant/sensor/sml/zaehler/state","unit_of_measurement": "Wh", "value_template": "{{ value_json.einspeisung}}"}"#,
+            r#"{"unique_id": "sml.einspeisung","state_class": "total_increasing", "device_class": "energy", "name": "Netzeinspeisung", "state_topic": "homeassistant/sensor/sml/zaehler/state","unit_of_measurement": "Wh", "value_template": "{{ value_json.einspeisung / 10}}"}"#,
         ),
         (
             "homeassistant/binary_sensor/sml/feed/config",

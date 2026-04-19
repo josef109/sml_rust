@@ -22,7 +22,7 @@ use anyhow::Context;
 use thiserror::Error;
 
 use crate::config::get_config;
-use crate::model::{SensorData, SharedAppState, SseData};
+use crate::model::{self, Energy, SensorData, SharedAppState, SseData};
 use crate::rrd::update_rrd;
 
 struct BitsNStrings {
@@ -263,12 +263,17 @@ async fn process_sml_messages(
 }
 
 fn update_import(sensor: &mut SensorData, val: u64) {
-    if sensor.import_old == 0 {
-        sensor.import_old = val;
+    let new = model::Energy(val);
+
+    if sensor.import_old == model::Energy(0) {
+        sensor.import_old = new;
     }
-    sensor.import_diff = (val - sensor.import_old) as u32;
-    sensor.import_old = val;
-    sensor.import = val;
+
+    let diff = new.0.saturating_sub(sensor.import_old.0);
+    sensor.import_diff = diff as u32;
+
+    sensor.import_old = new;
+    sensor.import = new;
 }
 
 async fn handle_logic_update(
@@ -300,32 +305,37 @@ async fn handle_logic_update(
     }
 
     let now = Instant::now();
-    let w = sensor.power; //-sensor.power;
+    let w = sensor.power;
     if let Some(last_time) = sensor.last_integration_time {
-        let dt = now.duration_since(last_time).as_millis() as u32;
+        let dt = now.duration_since(last_time).as_millis() as u64;
         if w < 0 || sensor.power_old < 0 {
-            let p_avg = (((-sensor.power_old).max(0) + (-w).max(0)) / 2) as u32;
-            sensor.export += p_avg as u64 * dt as u64; // 1/10 W * ms     ms 1000  3600 h    // / 360.0; // 1/10 Wh
+            let p_avg_tenths = ((-sensor.power_old).max(0) as u64 + (-w).max(0) as u64) / 2;
+            sensor.export += model::HighResEnergy(p_avg_tenths * dt);
         }
     }
+
     sensor.last_integration_time = Some(now);
     sensor.power_old = sensor.power;
-    sensor.export_diff = (sensor.export - sensor.export_old) as u32;
+
+    // Diff wird in High-Res berechnet
+    sensor.export_diff = sensor.export.0.saturating_sub(sensor.export_old.0);
     sensor.export_old = sensor.export;
 
     let rrd_import = sensor.import;
-    let rrd_export = sensor.export / 2000000;
+    // Einfach in Standard-Energy umwandeln
+    let rrd_export = sensor.export.to_energy();
     let rrd_power = sensor.power;
 
     tokio::task::spawn_blocking(move || {
-        if let Err(e) = update_rrd(rrd_import, rrd_export, rrd_power) {
+        if let Err(e) = update_rrd(rrd_import.0, rrd_export.0, rrd_power) {
             error!("RRD Update fehlgeschlagen: {:?}", e);
         }
     });
+
     info!(
         "Bezug: {} Einspeisung: {} Wirkleistung: {}",
-        sensor.import as f64 / 10.0,
-        sensor.export as f32 / 2000000.0,
+        sensor.import,
+        sensor.export.to_energy(),
         sensor.power as f32 / 10.0
     );
 
@@ -336,12 +346,10 @@ async fn handle_logic_update(
 
     if should_publish {
         let json_payload = format!(
-            "{{\"Time\":\"{}\",\"bezug\":{}.{},\"einspeisung\":{}.{}}}",
+            "{{\"Time\":\"{}\",\"bezug\":{},\"einspeisung\":{}}}",
             Local::now().to_rfc3339(),
-            sensor.import / 10,
-            sensor.import % 10,
-            sensor.export / 20000000,
-            sensor.export % 20000000 / 2000000
+            sensor.import.0,
+            sensor.export.to_energy().0
         );
         let _ = client
             .publish(
@@ -359,39 +367,38 @@ async fn handle_logic_update(
             "homeassistant/sensor/sml/wirkleistung/state",
             QoS::AtLeastOnce,
             false,
-            (sensor.power / 10).to_string() + "." + &(sensor.power % 10).to_string(),
+            sensor.power.to_string(),
         )
         .await;
 
     match app_state.lock() {
         Ok(state) => {
-            // state.power = sensor.power as f32 / 10.0;
-            // state.import_diff = sensor.import_diff as f32 / 10.0;
             let _ = state.tx.send(SseData {
-                time: Local::now(), //.format("%H:%M:%S").to_string(),
+                time: Local::now(),
                 power: sensor.power,
                 import: sensor.import,
-                import_diff: sensor.import_diff,
-                export: sensor.export / 2000000,
-                export_diff: sensor.export_diff / 2000000,
+                import_diff: sensor.import_diff as f32,
+                export: sensor.export.to_energy(),
+
+                // Diff umrechnen: Da export_diff in HighRes (u64) ist, skalieren wir es runter.
+                // Das geteilt durch 10 bringt es von 0.1 Wh auf echte Wh.
+                export_diff: (sensor.export_diff as f32
+                    / model::HighResEnergy::SCALE_FACTOR as f32)
+                    / 10.0,
+
                 is_feed_in: sensor.export_sts,
             });
         }
-        Err(e) => {
-            error!("App State Mutex Poisoned: {}", e);
-        }
+        Err(e) => error!("App State Mutex Poisoned: {}", e),
     }
 
-    // Innerhalb von handle_logic_update:
     let now = Local::now();
     let today = now.date_naive();
 
-    // Prüfen ob ein neuer Tag angebrochen ist
-    // Innerhalb von handle_logic_update:
     if sensor.last_daily_log != today {
         let path = &config.daily_log_path;
 
-        let result: anyhow::Result<()> = (|| {
+        let _result: anyhow::Result<()> = (|| {
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
@@ -408,33 +415,25 @@ async fn handle_logic_update(
                 "{};{};{}",
                 today,
                 sensor.import,
-                sensor.export / 2000000
+                sensor.export.to_energy()
             )?;
             Ok(())
         })();
-
-        match result {
-            Ok(_) => {
-                sensor.last_daily_log = today;
-                info!("Tagesstatistik erfolgreich gespeichert.");
-            }
-            Err(e) => error!("Konnte Tagesstatistik nicht schreiben: {:?}", e),
-        }
     }
 }
 
-pub fn load_initial_values() -> u64 {
+pub fn load_initial_values() -> Energy {
     // Wir versuchen zu laden, bei jedem Fehler loggen wir ihn und starten mit 0
     match try_load_history() {
         Ok(export) => export,
         Err(e) => {
             info!("Starte mit Initialwert 0 (Grund: {})", e);
-            0
+            model::Energy(0)
         }
     }
 }
 
-fn try_load_history() -> anyhow::Result<u64> {
+fn try_load_history() -> anyhow::Result<Energy> {
     let config = get_config();
     let path = PathBuf::from(&config.daily_log_path);
 
@@ -451,7 +450,7 @@ fn try_load_history() -> anyhow::Result<u64> {
         .context("Datei ist leer oder enthält nur Leerzeilen")?;
 
     if last_line.starts_with("Datum") {
-        return Ok(0);
+        return Ok(model::Energy(0));
     }
 
     let parts: Vec<&str> = last_line.split(';').collect();
@@ -466,5 +465,6 @@ fn try_load_history() -> anyhow::Result<u64> {
         .with_context(|| format!("Ungültiger Export-Wert in Zeile: '{}'", last_line))?;
 
     info!("Historie geladen: Export steht bei {}", export);
-    Ok(export * 2000000)
+
+    Ok(model::Energy(export))
 }

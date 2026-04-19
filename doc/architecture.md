@@ -6,8 +6,8 @@
 Smart Meter
    │
    ▼
-Serial / TCP Input
-   │  (socat)
+Serial / USB / TCP Input (socat)
+   │  
    ▼
 SML Decoder (Rust)
    │
@@ -17,10 +17,10 @@ Processing / Storage / Export
 
 ### Components
 
-- **Input Layer**: Receives raw SML telegrams via serial or TCP socat (pty)
+- **Input Layer**: Receives raw SML telegrams via serial, USB or TCP socat (pty)
 - **Parser**: Decodes SML frames into structured data
 - **Processing Layer**: Validates and transforms meter values
-- **Output Layer**: Exports data (e.g. logging, RRD, network)
+- **Output Layer**: Exports data (e.g. logging, RRD, CSV, network)
 
 ### Design Goals
 
@@ -28,6 +28,7 @@ Processing / Storage / Export
 - Low memory footprint
 - Embedded compatibility
 - Clear separation of concerns
+- stable and reliable (the previous python script hangs every week)
 ---
 ```mermaid
 sequenceDiagram
@@ -35,6 +36,7 @@ sequenceDiagram
     participant Reader as SML Reader (Rust)
     participant MQTT as MQTT Broker
     participant RRD as RRD Database
+    participant CSV as CSV file
     participant State as Shared State
     participant Web as Web Client
 
@@ -44,6 +46,7 @@ sequenceDiagram
     par Update Outputs
         Reader->>MQTT: Publish Payload (JSON)
         Reader->>RRD: Update Values (rrdtool update)
+        Reader->>CSV: Update CSV file
         Reader->>State: Update Mutex & Broadcast Event
     end
 

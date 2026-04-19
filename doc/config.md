@@ -9,6 +9,8 @@
 --rrd-backup-path|RRD_BACKUP_PATH|./bak/ehz.rrd|Path for shutdown backups.
 --image-output-path|IMAGE_OUTPUT_PATH|/tmp/sml_rust|Directory for generated PNG graphs.
 --server-addr|SERVER_ADDR|0.0.0.0:5000|Web server bind address.
+--daily-log-path|DAILY_LOG_PATH|./bak/daily_stats.csv|path and name of the csv file.
+
 
 ---
 ## Example Usage

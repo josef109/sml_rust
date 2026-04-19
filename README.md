@@ -1,15 +1,15 @@
 # Smart Meter SML Reader & Visualizer
 
-A robust, asynchronous Rust application designed to read energy consumption data from smart meters via SML (Smart Message Language). It features real-time visualization, historical data logging (RRD), and Home Assistant integration via MQTT.
+A robust, asynchronous Rust application designed to read energy consumption data from smart meters via SML (Smart Message Language). It features real-time visualization, historical data logging (RRD), and Home Assistant integration via MQTT with autodiscovery.
 
-The project is suitable for embedded devices (e.g. Raspberry Pi), servers, and containerized environments.
+The project is suitable for embedded devices (e.g. Raspberry Pi, nanopi, pi zero), servers, and containerized environments.
 
 ## 🚀 Features
 
 * **Serial SML Parsing:** Reads binary SML messages from USB IR optical heads (e.g., for EHZ meters).
 * **Real-time Dashboard:** Web interface with Server-Sent Events (SSE) for live power consumption updates.
-* **Historical Data:** Stores metrics in a Round Robin Database (RRD) for efficient long-term storage.
-* **Graph Generation:** Automatically generates hourly, daily, and weekly PNG charts (English & German).
+* **Historical Data:** Stores metrics in a Round Robin Database (RRD) for efficient long-term storage. Stores the meter readings daily at 00:00 in a CSV file.
+* **Graph Generation:** Automatically generates hourly, daily, weekly and monthly PNG charts (English & German).
 * **Home Assistant Ready:** Auto-discovery and state publishing via MQTT.
 * **Feed-in Calculation:** Logic to calculate energy export even if the meter only provides signed power values.
 ---
@@ -24,7 +24,7 @@ The application runs on the `tokio` runtime and orchestrates three main asynchro
 ```mermaid
 graph TD
     subgraph Hardware
-        Meter[Smart Meter] -->|Serial / USB| SerialPort[/"Serial Port"/] --> x[Raspi <br>NanoPi] -->|TCP| cloud((LAN))
+        Meter[Smart Meter<br>reading head] -->|Serial / USB| SerialPort[/"Serial Port"/] --> x[Raspi <br>NanoPi] -->|TCP| cloud((LAN))
     end
 ```    
 ```mermaid
@@ -37,7 +37,7 @@ graph TD
 
         SerialLoop["**SML Reader Loop**<br>Reads bytes, parses SML,<br>updates state"]
         
-        GraphLoop["**RRD Graph Loop**<br>Generates PNG images<br>periodically"]
+        GraphLoop["**RRD Graph Loop**<br>Generates PNG images<br>and write csv<br>periodically"]
         
         WebLoop["**Web Server**<br>Axum HTTP & SSE"]
         

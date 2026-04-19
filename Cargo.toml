@@ -8,7 +8,7 @@ tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7.10"
 serialport = "4.8"
 rumqttc = "0.25"
-axum = "0.8"
+axum = "0.7"
 tokio-stream = {version = "0.1", features = ["sync"]}
 bytes = "1"
 chrono = { version = "0.4", features = ["serde"] }
@@ -22,6 +22,7 @@ clap = { version = "4.5", features = ["derive", "env"] }
 sml-rs= "0.4"
 rrd = "*"
 tower-http = { version = "0.6", features = ["fs"] }
+derive_more = { version = "1.0", features = ["add", "add_assign", "mul"] }
 
 [patch.crates-io]
 rrd = { path = "vendor/rrd" }
